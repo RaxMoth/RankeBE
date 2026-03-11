@@ -1,0 +1,79 @@
+# Environment variables - Never commit these
+.env
+.env.local
+.env.*.local
+.env.production
+
+# Build artifacts
+bin/
+dist/
+build/
+*.exe
+*.exe~
+*.dll
+*.so
+*.so.*
+*.dylib
+
+# IDE and editor files
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+*.sublime-workspace
+*.sublime-project
+.DS_Store
+Thumbs.db
+*.code-workspace
+
+# Go-specific
+vendor/
+go.sum
+*.test
+coverage.out
+coverage.html
+*.prof
+
+# Database
+*.db
+*.sqlite
+*.sqlite3
+*.sql
+
+# Firebase credentials - NEVER commit these
+serviceAccountKey.json
+firebase-key.json
+*.json.private
+
+# Logs
+*.log
+logs/
+
+# Temporary files
+tmp/
+temp/
+*.tmp
+
+# Cache directories
+.cache/
+cache/
+
+# macOS specific
+.DS_Store
+.AppleDouble
+.LSOverride
+
+# Linux specific
+.~*
+
+# Windows specific
+Thumbs.db
+ehthumbs.db
+Desktop.ini
+
+# Project specific
+dist/
+node_modules/
+yarn.lock
+package-lock.json
