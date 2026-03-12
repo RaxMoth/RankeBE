@@ -6,84 +6,65 @@ import (
 
 	"github.com/gin-gonic/gin"
 	"github.com/golang-jwt/jwt/v5"
+	"github.com/jackc/pgx/v5/pgtype"
 )
 
-type Claims struct {
-	UserID string `json:"user_id"`
-	Email  string `json:"email"`
-	jwt.RegisteredClaims
-}
+const UserIDKey = "userID"
 
-func AuthMiddleware(jwtSecret string) gin.HandlerFunc {
+func AuthRequired(jwtSecret string) gin.HandlerFunc {
 	return func(c *gin.Context) {
-		authHeader := c.GetHeader("Authorization")
-		if authHeader == "" {
-			c.JSON(http.StatusUnauthorized, gin.H{
-				"error":   "unauthorized",
-				"message": "Authorization header is required",
-			})
-			c.Abort()
+		header := c.GetHeader("Authorization")
+		if header == "" {
+			c.AbortWithStatusJSON(http.StatusUnauthorized, gin.H{"error": gin.H{"code": "UNAUTHORIZED", "message": "missing authorization header"}})
 			return
 		}
 
-		// Extract token from "Bearer <token>"
-		parts := strings.Split(authHeader, " ")
-		if len(parts) != 2 || parts[0] != "Bearer" {
-			c.JSON(http.StatusUnauthorized, gin.H{
-				"error":   "unauthorized",
-				"message": "Invalid authorization header format",
-			})
-			c.Abort()
+		parts := strings.SplitN(header, " ", 2)
+		if len(parts) != 2 || !strings.EqualFold(parts[0], "bearer") {
+			c.AbortWithStatusJSON(http.StatusUnauthorized, gin.H{"error": gin.H{"code": "UNAUTHORIZED", "message": "invalid authorization header format"}})
 			return
 		}
 
-		tokenString := parts[1]
-
-		// Parse and validate token
-		token, err := jwt.ParseWithClaims(tokenString, &Claims{}, func(token *jwt.Token) (interface{}, error) {
+		token, err := jwt.Parse(parts[1], func(t *jwt.Token) (any, error) {
+			if _, ok := t.Method.(*jwt.SigningMethodHMAC); !ok {
+				return nil, jwt.ErrSignatureInvalid
+			}
 			return []byte(jwtSecret), nil
 		})
-
 		if err != nil || !token.Valid {
-			c.JSON(http.StatusUnauthorized, gin.H{
-				"error":   "unauthorized",
-				"message": "Invalid or expired token",
-			})
-			c.Abort()
+			c.AbortWithStatusJSON(http.StatusUnauthorized, gin.H{"error": gin.H{"code": "UNAUTHORIZED", "message": "invalid or expired token"}})
 			return
 		}
 
-		// Extract claims and set in context
-		if claims, ok := token.Claims.(*Claims); ok {
-			c.Set("user_id", claims.UserID)
-			c.Set("email", claims.Email)
-		} else {
-			c.JSON(http.StatusUnauthorized, gin.H{
-				"error":   "unauthorized",
-				"message": "Invalid token claims",
-			})
-			c.Abort()
+		sub, err := token.Claims.GetSubject()
+		if err != nil || sub == "" {
+			c.AbortWithStatusJSON(http.StatusUnauthorized, gin.H{"error": gin.H{"code": "UNAUTHORIZED", "message": "invalid token claims"}})
 			return
 		}
 
+		c.Set(UserIDKey, sub)
 		c.Next()
 	}
 }
 
-// GetUserID is a helper function to get user ID from context
-func GetUserID(c *gin.Context) string {
-	userID, exists := c.Get("user_id")
+// GetUserID extracts the authenticated user's UUID from the Gin context.
+func GetUserID(c *gin.Context) (pgtype.UUID, bool) {
+	raw, exists := c.Get(UserIDKey)
 	if !exists {
-		return ""
+		return pgtype.UUID{}, false
 	}
-	return userID.(string)
+	s, ok := raw.(string)
+	if !ok {
+		return pgtype.UUID{}, false
+	}
+	return ParseUUID(s)
 }
 
-// GetEmail is a helper function to get email from context
-func GetEmail(c *gin.Context) string {
-	email, exists := c.Get("email")
-	if !exists {
-		return ""
+// ParseUUID converts a string UUID to pgtype.UUID.
+func ParseUUID(s string) (pgtype.UUID, bool) {
+	var u pgtype.UUID
+	if err := u.Scan(s); err != nil {
+		return pgtype.UUID{}, false
 	}
-	return email.(string)
+	return u, true
 }

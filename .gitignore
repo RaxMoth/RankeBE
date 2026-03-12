@@ -39,12 +39,9 @@ coverage.html
 *.db
 *.sqlite
 *.sqlite3
-*.sql
 
-# Firebase credentials - NEVER commit these
-serviceAccountKey.json
-firebase-key.json
-*.json.private
+# Binary
+/server
 
 # Logs
 *.log
