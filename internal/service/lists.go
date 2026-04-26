@@ -20,7 +20,43 @@ func NewListService(queries *db.Queries, pool *pgxpool.Pool) *ListService {
 	return &ListService{queries: queries, pool: pool}
 }
 
-func (s *ListService) CreateList(ctx context.Context, ownerID pgtype.UUID, title string, description pgtype.Text, valueType, rankOrder string, isPublic bool) (*db.List, error) {
+// CreateListInput collects the create-list form. Optional fields are
+// pgtype-wrapped so a NULL `description` (etc.) is preserved.
+type CreateListInput struct {
+	OwnerID      pgtype.UUID
+	Title        string
+	Description  pgtype.Text
+	ValueType    string
+	RankOrder    string
+	IsPublic     bool
+	Category     pgtype.Text
+	TelegramLink pgtype.Text
+	WhatsappLink pgtype.Text
+	DiscordLink  pgtype.Text
+}
+
+// UpdateListInput uses pgtype.* for every field so the caller can express
+// "leave this column alone" with an invalid pgtype value (the SQL uses
+// COALESCE(narg, column) to keep the existing value).
+type UpdateListInput struct {
+	ID           pgtype.UUID
+	Title        pgtype.Text
+	Description  pgtype.Text
+	IsPublic     pgtype.Bool
+	Locked       pgtype.Bool
+	Category     pgtype.Text
+	TelegramLink pgtype.Text
+	WhatsappLink pgtype.Text
+	DiscordLink  pgtype.Text
+}
+
+// RankUpdate is one row in a bulk-rank PATCH.
+type RankUpdate struct {
+	EntryID pgtype.UUID
+	Rank    int
+}
+
+func (s *ListService) CreateList(ctx context.Context, in CreateListInput) (*db.List, error) {
 	tx, err := s.pool.Begin(ctx)
 	if err != nil {
 		return nil, fmt.Errorf("begin tx: %w", err)
@@ -30,30 +66,32 @@ func (s *ListService) CreateList(ctx context.Context, ownerID pgtype.UUID, title
 	qtx := s.queries.WithTx(tx)
 
 	list, err := qtx.CreateList(ctx, db.CreateListParams{
-		OwnerID:     ownerID,
-		Title:       title,
-		Description: description,
-		ValueType:   valueType,
-		RankOrder:   rankOrder,
-		IsPublic:    isPublic,
+		OwnerID:      in.OwnerID,
+		Title:        in.Title,
+		Description:  in.Description,
+		ValueType:    in.ValueType,
+		RankOrder:    in.RankOrder,
+		IsPublic:     in.IsPublic,
+		Category:     in.Category,
+		TelegramLink: in.TelegramLink,
+		WhatsappLink: in.WhatsappLink,
+		DiscordLink:  in.DiscordLink,
 	})
 	if err != nil {
 		return nil, fmt.Errorf("create list: %w", err)
 	}
 
-	_, err = qtx.CreateListMember(ctx, db.CreateListMemberParams{
+	if _, err := qtx.CreateListMember(ctx, db.CreateListMemberParams{
 		ListID: list.ID,
-		UserID: ownerID,
+		UserID: in.OwnerID,
 		Role:   "owner",
-	})
-	if err != nil {
+	}); err != nil {
 		return nil, fmt.Errorf("create owner member: %w", err)
 	}
 
 	if err := tx.Commit(ctx); err != nil {
 		return nil, fmt.Errorf("commit tx: %w", err)
 	}
-
 	return &list, nil
 }
 
@@ -77,12 +115,27 @@ func (s *ListService) GetMemberRole(ctx context.Context, listID, userID pgtype.U
 	return member.Role, nil
 }
 
-func (s *ListService) UpdateList(ctx context.Context, listID pgtype.UUID, title string, description pgtype.Text, isPublic bool) (*db.List, error) {
+// GetMemberCount returns the number of members of a list. Used to populate
+// `memberCount` in the list DTO.
+func (s *ListService) GetMemberCount(ctx context.Context, listID pgtype.UUID) (int, error) {
+	rows, err := s.queries.ListMembers(ctx, listID)
+	if err != nil {
+		return 0, err
+	}
+	return len(rows), nil
+}
+
+func (s *ListService) UpdateList(ctx context.Context, in UpdateListInput) (*db.List, error) {
 	list, err := s.queries.UpdateList(ctx, db.UpdateListParams{
-		ID:          listID,
-		Title:       title,
-		Description: description,
-		IsPublic:    isPublic,
+		ID:           in.ID,
+		Title:        in.Title,
+		Description:  in.Description,
+		IsPublic:     in.IsPublic,
+		Locked:       in.Locked,
+		Category:     in.Category,
+		TelegramLink: in.TelegramLink,
+		WhatsappLink: in.WhatsappLink,
+		DiscordLink:  in.DiscordLink,
 	})
 	if err != nil {
 		return nil, fmt.Errorf("update list: %w", err)
@@ -104,9 +157,8 @@ func (s *ListService) JoinPublicList(ctx context.Context, listID, userID pgtype.
 	}
 
 	// Idempotent — if already a member, return success
-	_, err = s.queries.GetListMember(ctx, db.GetListMemberParams{ListID: listID, UserID: userID})
-	if err == nil {
-		return nil // Already a member
+	if _, err := s.queries.GetListMember(ctx, db.GetListMemberParams{ListID: listID, UserID: userID}); err == nil {
+		return nil
 	}
 
 	_, err = s.queries.CreateListMember(ctx, db.CreateListMemberParams{
@@ -131,22 +183,37 @@ func (s *ListService) JoinByInvite(ctx context.Context, inviteToken pgtype.UUID,
 		return nil, fmt.Errorf("invalid invite token")
 	}
 
-	// Idempotent
-	_, err = s.queries.GetListMember(ctx, db.GetListMemberParams{ListID: list.ID, UserID: userID})
-	if err == nil {
+	if _, err := s.queries.GetListMember(ctx, db.GetListMemberParams{ListID: list.ID, UserID: userID}); err == nil {
 		return &list, nil
 	}
 
-	_, err = s.queries.CreateListMember(ctx, db.CreateListMemberParams{
+	if _, err := s.queries.CreateListMember(ctx, db.CreateListMemberParams{
 		ListID: list.ID,
 		UserID: userID,
 		Role:   "member",
-	})
-	if err != nil {
+	}); err != nil {
 		return nil, fmt.Errorf("join list: %w", err)
 	}
 
 	return &list, nil
+}
+
+// RegenerateInviteToken rotates the invite token (invalidates any old links).
+func (s *ListService) RegenerateInviteToken(ctx context.Context, listID pgtype.UUID) (pgtype.UUID, error) {
+	return s.queries.RegenerateInviteToken(ctx, listID)
+}
+
+// SearchPublicLists searches public lists by title/description and category.
+// Both args are optional — empty strings drop the filter.
+func (s *ListService) SearchPublicLists(ctx context.Context, query, category string) ([]db.SearchPublicListsRow, error) {
+	params := db.SearchPublicListsParams{}
+	if query != "" {
+		params.Q = pgtype.Text{String: query, Valid: true}
+	}
+	if category != "" {
+		params.Category = pgtype.Text{String: category, Valid: true}
+	}
+	return s.queries.SearchPublicLists(ctx, params)
 }
 
 func (s *ListService) GetMembers(ctx context.Context, listID pgtype.UUID) ([]db.ListMembersRow, error) {
@@ -154,7 +221,6 @@ func (s *ListService) GetMembers(ctx context.Context, listID pgtype.UUID) ([]db.
 }
 
 func (s *ListService) UpdateMemberRole(ctx context.Context, listID, targetUserID pgtype.UUID, role string) (*db.ListMember, error) {
-	// Check the target is not the owner
 	list, err := s.queries.GetListByID(ctx, listID)
 	if err != nil {
 		return nil, err
@@ -194,11 +260,9 @@ func (s *ListService) RemoveMember(ctx context.Context, listID, targetUserID pgt
 	if err := qtx.DeleteListMember(ctx, db.DeleteListMemberParams{ListID: listID, UserID: targetUserID}); err != nil {
 		return fmt.Errorf("delete member: %w", err)
 	}
-
 	if err := qtx.DeleteEntryByListAndUser(ctx, db.DeleteEntryByListAndUserParams{ListID: listID, UserID: targetUserID}); err != nil {
 		return fmt.Errorf("delete entry: %w", err)
 	}
-
 	return tx.Commit(ctx)
 }
 
@@ -218,16 +282,12 @@ func (s *ListService) BulkUpdateRanks(ctx context.Context, updates []RankUpdate)
 			return fmt.Errorf("update rank for entry: %w", err)
 		}
 	}
-
 	return tx.Commit(ctx)
 }
 
-type RankUpdate struct {
-	EntryID pgtype.UUID
-	Rank    int
-}
-
-// GetRankedEntries returns ranked entries for a list, using the appropriate query based on value_type and rank_order.
+// GetRankedEntries returns ranked entries for a list, dispatching on the
+// list's value_type / rank_order. Returns one of five concrete row slice
+// types — callers should run it through dto.MapRankedEntries.
 func (s *ListService) GetRankedEntries(ctx context.Context, list *db.List) (any, error) {
 	switch list.ValueType {
 	case "number":
@@ -245,4 +305,50 @@ func (s *ListService) GetRankedEntries(ctx context.Context, list *db.List) (any,
 	default:
 		return nil, fmt.Errorf("unknown value type: %s", list.ValueType)
 	}
+}
+
+// GetUserCurrentRank returns the user's current rank on the given list, or
+// nil if they have no entry yet. Used by the upsert flow to populate
+// `previous_rank` on each submission and by the lists feed to populate
+// each summary's `ownRank`.
+func (s *ListService) GetUserCurrentRank(ctx context.Context, listID, userID pgtype.UUID, valueType, rankOrder string) (*int, error) {
+	var rank int32
+	var err error
+
+	switch valueType {
+	case "number":
+		if rankOrder == "desc" {
+			rank, err = s.queries.GetCurrentRankByNumberDesc(ctx, db.GetCurrentRankByNumberDescParams{ListID: listID, UserID: userID})
+		} else {
+			rank, err = s.queries.GetCurrentRankByNumber(ctx, db.GetCurrentRankByNumberParams{ListID: listID, UserID: userID})
+		}
+	case "duration":
+		if rankOrder == "desc" {
+			rank, err = s.queries.GetCurrentRankByDurationDesc(ctx, db.GetCurrentRankByDurationDescParams{ListID: listID, UserID: userID})
+		} else {
+			rank, err = s.queries.GetCurrentRankByDuration(ctx, db.GetCurrentRankByDurationParams{ListID: listID, UserID: userID})
+		}
+	case "text":
+		rank, err = s.queries.GetCurrentRankByText(ctx, db.GetCurrentRankByTextParams{ListID: listID, UserID: userID})
+	default:
+		return nil, fmt.Errorf("unknown value type: %s", valueType)
+	}
+
+	if err != nil {
+		// pgx returns ErrNoRows when the user has no entry — treat as nil.
+		return nil, nil
+	}
+	v := int(rank)
+	return &v, nil
+}
+
+// GetUserRankFromRow is a convenience wrapper over GetUserCurrentRank that
+// only fires the lookup when the user actually has an entry on the list
+// (per the GetUserListsRow.OwnEntryID column). Saves a query per board on
+// the home feed.
+func (s *ListService) GetUserRankFromRow(ctx context.Context, r db.GetUserListsRow, userID pgtype.UUID) (*int, error) {
+	if !r.OwnEntryID.Valid {
+		return nil, nil
+	}
+	return s.GetUserCurrentRank(ctx, r.ID, userID, r.ValueType, r.RankOrder)
 }

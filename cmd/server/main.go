@@ -46,14 +46,15 @@ func main() {
 		appleVerifier = apple.NewVerifier(cfg.AppleBundleID)
 	}
 
-	// Services
+	// Services — entry service depends on the list service for value-type /
+	// rank-order context when computing previous_rank.
 	authSvc := service.NewAuthService(queries, pool, cfg, appleVerifier)
 	listSvc := service.NewListService(queries, pool)
-	entrySvc := service.NewEntryService(queries)
+	entrySvc := service.NewEntryService(queries, pool, listSvc)
 
 	// Handlers
 	authH := handler.NewAuthHandler(authSvc)
-	userH := handler.NewUserHandler(queries)
+	userH := handler.NewUserHandler(queries, listSvc)
 	listH := handler.NewListHandler(listSvc)
 	entryH := handler.NewEntryHandler(entrySvc, listSvc)
 
@@ -93,12 +94,14 @@ func main() {
 		// Users
 		protected.GET("/users/me", userH.GetMe)
 		protected.PATCH("/users/me", userH.UpdateMe)
+		protected.GET("/users/:id/profile", userH.GetUserProfile)
 
-		// Lists
+		// Lists — caller's lists + public discover + create
 		protected.GET("/lists", listH.GetUserLists)
+		protected.GET("/lists/public", listH.SearchPublic)
 		protected.POST("/lists", listH.Create)
 
-		// Invite routes (no list membership required, just auth)
+		// Invite routes (auth-only, no list membership required)
 		protected.GET("/lists/invite/:token", listH.GetInvitePreview)
 		protected.POST("/lists/invite/:token/join", listH.JoinByInvite)
 
@@ -113,6 +116,15 @@ func main() {
 			ownerAdmin.PATCH("", listH.Update)
 			ownerAdmin.PATCH("/entries/ranks", listH.BulkUpdateRanks)
 			ownerAdmin.DELETE("/members/:userId", listH.RemoveMember)
+
+			// Invite link management
+			ownerAdmin.GET("/invite", listH.GetInviteLink)
+			ownerAdmin.POST("/invite/regenerate", listH.RegenerateInvite)
+
+			// Moderation: pending feed + approve/reject
+			ownerAdmin.GET("/entries/pending", entryH.GetPendingEntries)
+			ownerAdmin.POST("/entries/:entryId/approve", entryH.ApproveEntry)
+			ownerAdmin.POST("/entries/:entryId/reject", entryH.RejectEntry)
 		}
 
 		// List routes requiring owner only

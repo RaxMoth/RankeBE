@@ -5,6 +5,7 @@ import (
 
 	"github.com/gin-gonic/gin"
 
+	"ranke-be/internal/handler/dto"
 	"ranke-be/internal/middleware"
 	"ranke-be/internal/service"
 )
@@ -18,10 +19,13 @@ func NewEntryHandler(entries *service.EntryService, lists *service.ListService) 
 	return &EntryHandler{entries: entries, lists: lists}
 }
 
+// upsertEntryRequest accepts camelCase to match the mobile client.
+// All fields are optional — the value-type validation happens server-side
+// based on the list's value_type column.
 type upsertEntryRequest struct {
-	ValueNumber     *float64 `json:"value_number"`
-	ValueDurationMs *int64   `json:"value_duration_ms"`
-	ValueText       *string  `json:"value_text"`
+	ValueNumber     *float64 `json:"valueNumber"`
+	ValueDurationMs *int64   `json:"valueDurationMs"`
+	ValueText       *string  `json:"valueText"`
 	Note            *string  `json:"note"`
 }
 
@@ -44,29 +48,31 @@ func (h *EntryHandler) UpsertMyEntry(c *gin.Context) {
 		return
 	}
 
-	// Get list to know the value_type
 	list, err := h.lists.GetListByID(c.Request.Context(), listID)
 	if err != nil {
 		Fail(c, http.StatusNotFound, CodeListNotFound, "list not found")
 		return
 	}
 
-	entry, err := h.entries.UpsertEntry(c.Request.Context(), listID, userID, list.ValueType, service.UpsertEntryInput{
+	entry, err := h.entries.UpsertEntry(c.Request.Context(), listID, userID, list, service.UpsertEntryInput{
 		ValueNumber:     req.ValueNumber,
 		ValueDurationMs: req.ValueDurationMs,
 		ValueText:       req.ValueText,
 		Note:            req.Note,
 	})
 	if err != nil {
-		if err.Error() == "INVALID_VALUE_TYPE" {
+		switch err.Error() {
+		case "INVALID_VALUE_TYPE":
 			Fail(c, http.StatusBadRequest, CodeInvalidValueType, "value does not match list type: "+list.ValueType)
-			return
+		case "LIST_LOCKED":
+			Fail(c, http.StatusForbidden, CodeForbidden, "this list is locked")
+		default:
+			InternalError(c)
 		}
-		InternalError(c)
 		return
 	}
 
-	Success(c, http.StatusOK, entry)
+	Success(c, http.StatusOK, dto.MapEntry(*entry))
 }
 
 func (h *EntryHandler) DeleteMyEntry(c *gin.Context) {
@@ -90,6 +96,7 @@ func (h *EntryHandler) DeleteMyEntry(c *gin.Context) {
 	Success(c, http.StatusOK, gin.H{"message": "entry deleted"})
 }
 
+// DeleteEntry — owner/admin only (delete any user's entry).
 func (h *EntryHandler) DeleteEntry(c *gin.Context) {
 	entryID, ok := middleware.ParseUUID(c.Param("entryId"))
 	if !ok {
@@ -103,4 +110,64 @@ func (h *EntryHandler) DeleteEntry(c *gin.Context) {
 	}
 
 	Success(c, http.StatusOK, gin.H{"message": "entry deleted"})
+}
+
+// ── moderation (owner/admin) ─────────────────────────────────────────
+
+func (h *EntryHandler) GetPendingEntries(c *gin.Context) {
+	listID, ok := middleware.ParseUUID(c.Param("id"))
+	if !ok {
+		ValidationError(c, "invalid list id")
+		return
+	}
+
+	rows, err := h.entries.GetPendingEntries(c.Request.Context(), listID)
+	if err != nil {
+		InternalError(c)
+		return
+	}
+
+	out := make([]dto.RankedEntry, 0, len(rows))
+	for _, r := range rows {
+		out = append(out, dto.MapPendingEntryRow(r))
+	}
+	Success(c, http.StatusOK, out)
+}
+
+func (h *EntryHandler) ApproveEntry(c *gin.Context) {
+	listID, ok := middleware.ParseUUID(c.Param("id"))
+	if !ok {
+		ValidationError(c, "invalid list id")
+		return
+	}
+	entryID, ok := middleware.ParseUUID(c.Param("entryId"))
+	if !ok {
+		ValidationError(c, "invalid entry id")
+		return
+	}
+
+	if err := h.entries.ApproveEntry(c.Request.Context(), listID, entryID); err != nil {
+		InternalError(c)
+		return
+	}
+	Success(c, http.StatusOK, gin.H{"message": "approved"})
+}
+
+func (h *EntryHandler) RejectEntry(c *gin.Context) {
+	listID, ok := middleware.ParseUUID(c.Param("id"))
+	if !ok {
+		ValidationError(c, "invalid list id")
+		return
+	}
+	entryID, ok := middleware.ParseUUID(c.Param("entryId"))
+	if !ok {
+		ValidationError(c, "invalid entry id")
+		return
+	}
+
+	if err := h.entries.RejectEntry(c.Request.Context(), listID, entryID); err != nil {
+		InternalError(c)
+		return
+	}
+	Success(c, http.StatusOK, gin.H{"message": "rejected"})
 }

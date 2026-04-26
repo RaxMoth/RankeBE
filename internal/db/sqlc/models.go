@@ -19,19 +19,26 @@ type Entry struct {
 	Note            pgtype.Text        `json:"note"`
 	SubmittedAt     pgtype.Timestamptz `json:"submitted_at"`
 	UpdatedAt       pgtype.Timestamptz `json:"updated_at"`
+	Status          string             `json:"status"`
+	PreviousRank    pgtype.Int4        `json:"previous_rank"`
 }
 
 type List struct {
-	ID          pgtype.UUID        `json:"id"`
-	OwnerID     pgtype.UUID        `json:"owner_id"`
-	Title       string             `json:"title"`
-	Description pgtype.Text        `json:"description"`
-	ValueType   string             `json:"value_type"`
-	RankOrder   string             `json:"rank_order"`
-	IsPublic    bool               `json:"is_public"`
-	InviteToken pgtype.UUID        `json:"invite_token"`
-	CreatedAt   pgtype.Timestamptz `json:"created_at"`
-	UpdatedAt   pgtype.Timestamptz `json:"updated_at"`
+	ID           pgtype.UUID        `json:"id"`
+	OwnerID      pgtype.UUID        `json:"owner_id"`
+	Title        string             `json:"title"`
+	Description  pgtype.Text        `json:"description"`
+	ValueType    string             `json:"value_type"`
+	RankOrder    string             `json:"rank_order"`
+	IsPublic     bool               `json:"is_public"`
+	InviteToken  pgtype.UUID        `json:"invite_token"`
+	CreatedAt    pgtype.Timestamptz `json:"created_at"`
+	UpdatedAt    pgtype.Timestamptz `json:"updated_at"`
+	Category     pgtype.Text        `json:"category"`
+	Locked       bool               `json:"locked"`
+	TelegramLink pgtype.Text        `json:"telegram_link"`
+	WhatsappLink pgtype.Text        `json:"whatsapp_link"`
+	DiscordLink  pgtype.Text        `json:"discord_link"`
 }
 
 type ListMember struct {

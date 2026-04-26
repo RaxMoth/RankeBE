@@ -11,6 +11,7 @@ import (
 )
 
 type Querier interface {
+	ApproveEntry(ctx context.Context, arg ApproveEntryParams) error
 	CreateAppleUser(ctx context.Context, arg CreateAppleUserParams) (User, error)
 	CreateList(ctx context.Context, arg CreateListParams) (List, error)
 	CreateListMember(ctx context.Context, arg CreateListMemberParams) (ListMember, error)
@@ -20,12 +21,23 @@ type Querier interface {
 	DeleteEntryByListAndUser(ctx context.Context, arg DeleteEntryByListAndUserParams) error
 	DeleteList(ctx context.Context, id pgtype.UUID) error
 	DeleteListMember(ctx context.Context, arg DeleteListMemberParams) error
+	GetCurrentRankByDuration(ctx context.Context, arg GetCurrentRankByDurationParams) (int32, error)
+	GetCurrentRankByDurationDesc(ctx context.Context, arg GetCurrentRankByDurationDescParams) (int32, error)
+	// ── current rank lookups (used to populate previous_rank on upsert) ──
+	GetCurrentRankByNumber(ctx context.Context, arg GetCurrentRankByNumberParams) (int32, error)
+	GetCurrentRankByNumberDesc(ctx context.Context, arg GetCurrentRankByNumberDescParams) (int32, error)
+	GetCurrentRankByText(ctx context.Context, arg GetCurrentRankByTextParams) (int32, error)
+	GetEntryByListAndUser(ctx context.Context, arg GetEntryByListAndUserParams) (Entry, error)
 	GetInvitePreview(ctx context.Context, inviteToken pgtype.UUID) (GetInvitePreviewRow, error)
 	GetListByID(ctx context.Context, id pgtype.UUID) (List, error)
 	GetListByInviteToken(ctx context.Context, inviteToken pgtype.UUID) (List, error)
 	GetListMember(ctx context.Context, arg GetListMemberParams) (ListMember, error)
+	// ── moderation feed ──────────────────────────────────────────────────
+	GetPendingEntries(ctx context.Context, listID pgtype.UUID) ([]GetPendingEntriesRow, error)
+	GetPublicBoardsForUser(ctx context.Context, userID pgtype.UUID) ([]GetPublicBoardsForUserRow, error)
 	GetRankedEntriesByDuration(ctx context.Context, listID pgtype.UUID) ([]GetRankedEntriesByDurationRow, error)
 	GetRankedEntriesByDurationDesc(ctx context.Context, listID pgtype.UUID) ([]GetRankedEntriesByDurationDescRow, error)
+	// ── ranked feeds (only "approved" entries are ranked) ────────────────
 	GetRankedEntriesByNumber(ctx context.Context, listID pgtype.UUID) ([]GetRankedEntriesByNumberRow, error)
 	GetRankedEntriesByNumberDesc(ctx context.Context, listID pgtype.UUID) ([]GetRankedEntriesByNumberDescRow, error)
 	GetRankedEntriesByText(ctx context.Context, listID pgtype.UUID) ([]GetRankedEntriesByTextRow, error)
@@ -33,10 +45,14 @@ type Querier interface {
 	GetUserByEmail(ctx context.Context, email string) (User, error)
 	GetUserByID(ctx context.Context, id pgtype.UUID) (User, error)
 	GetUserLists(ctx context.Context, userID pgtype.UUID) ([]GetUserListsRow, error)
+	GetUserProfile(ctx context.Context, id pgtype.UUID) (GetUserProfileRow, error)
 	GetValidRefreshToken(ctx context.Context, token string) (RefreshToken, error)
 	ListMembers(ctx context.Context, listID pgtype.UUID) ([]ListMembersRow, error)
+	RegenerateInviteToken(ctx context.Context, id pgtype.UUID) (pgtype.UUID, error)
+	RejectEntry(ctx context.Context, arg RejectEntryParams) error
 	RevokeAllUserRefreshTokens(ctx context.Context, userID pgtype.UUID) error
 	RevokeRefreshToken(ctx context.Context, id pgtype.UUID) error
+	SearchPublicLists(ctx context.Context, arg SearchPublicListsParams) ([]SearchPublicListsRow, error)
 	UpdateDisplayName(ctx context.Context, arg UpdateDisplayNameParams) (User, error)
 	UpdateEntryManualRank(ctx context.Context, arg UpdateEntryManualRankParams) error
 	UpdateList(ctx context.Context, arg UpdateListParams) (List, error)

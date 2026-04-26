@@ -12,18 +12,25 @@ import (
 )
 
 const createList = `-- name: CreateList :one
-INSERT INTO lists (owner_id, title, description, value_type, rank_order, is_public)
-VALUES ($1, $2, $3, $4, $5, $6)
-RETURNING id, owner_id, title, description, value_type, rank_order, is_public, invite_token, created_at, updated_at
+INSERT INTO lists (
+  owner_id, title, description, value_type, rank_order, is_public,
+  category, telegram_link, whatsapp_link, discord_link
+)
+VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10)
+RETURNING id, owner_id, title, description, value_type, rank_order, is_public, invite_token, created_at, updated_at, category, locked, telegram_link, whatsapp_link, discord_link
 `
 
 type CreateListParams struct {
-	OwnerID     pgtype.UUID `json:"owner_id"`
-	Title       string      `json:"title"`
-	Description pgtype.Text `json:"description"`
-	ValueType   string      `json:"value_type"`
-	RankOrder   string      `json:"rank_order"`
-	IsPublic    bool        `json:"is_public"`
+	OwnerID      pgtype.UUID `json:"owner_id"`
+	Title        string      `json:"title"`
+	Description  pgtype.Text `json:"description"`
+	ValueType    string      `json:"value_type"`
+	RankOrder    string      `json:"rank_order"`
+	IsPublic     bool        `json:"is_public"`
+	Category     pgtype.Text `json:"category"`
+	TelegramLink pgtype.Text `json:"telegram_link"`
+	WhatsappLink pgtype.Text `json:"whatsapp_link"`
+	DiscordLink  pgtype.Text `json:"discord_link"`
 }
 
 func (q *Queries) CreateList(ctx context.Context, arg CreateListParams) (List, error) {
@@ -34,6 +41,10 @@ func (q *Queries) CreateList(ctx context.Context, arg CreateListParams) (List, e
 		arg.ValueType,
 		arg.RankOrder,
 		arg.IsPublic,
+		arg.Category,
+		arg.TelegramLink,
+		arg.WhatsappLink,
+		arg.DiscordLink,
 	)
 	var i List
 	err := row.Scan(
@@ -47,6 +58,11 @@ func (q *Queries) CreateList(ctx context.Context, arg CreateListParams) (List, e
 		&i.InviteToken,
 		&i.CreatedAt,
 		&i.UpdatedAt,
+		&i.Category,
+		&i.Locked,
+		&i.TelegramLink,
+		&i.WhatsappLink,
+		&i.DiscordLink,
 	)
 	return i, err
 }
@@ -62,21 +78,29 @@ func (q *Queries) DeleteList(ctx context.Context, id pgtype.UUID) error {
 
 const getInvitePreview = `-- name: GetInvitePreview :one
 SELECT
-  l.id,
-  l.title,
-  l.value_type,
-  l.is_public,
+  l.id, l.owner_id, l.title, l.description, l.value_type, l.rank_order, l.is_public, l.invite_token, l.created_at, l.updated_at, l.category, l.locked, l.telegram_link, l.whatsapp_link, l.discord_link,
   (SELECT COUNT(*) FROM list_members WHERE list_id = l.id) AS member_count
 FROM lists l
 WHERE l.invite_token = $1
 `
 
 type GetInvitePreviewRow struct {
-	ID          pgtype.UUID `json:"id"`
-	Title       string      `json:"title"`
-	ValueType   string      `json:"value_type"`
-	IsPublic    bool        `json:"is_public"`
-	MemberCount int64       `json:"member_count"`
+	ID           pgtype.UUID        `json:"id"`
+	OwnerID      pgtype.UUID        `json:"owner_id"`
+	Title        string             `json:"title"`
+	Description  pgtype.Text        `json:"description"`
+	ValueType    string             `json:"value_type"`
+	RankOrder    string             `json:"rank_order"`
+	IsPublic     bool               `json:"is_public"`
+	InviteToken  pgtype.UUID        `json:"invite_token"`
+	CreatedAt    pgtype.Timestamptz `json:"created_at"`
+	UpdatedAt    pgtype.Timestamptz `json:"updated_at"`
+	Category     pgtype.Text        `json:"category"`
+	Locked       bool               `json:"locked"`
+	TelegramLink pgtype.Text        `json:"telegram_link"`
+	WhatsappLink pgtype.Text        `json:"whatsapp_link"`
+	DiscordLink  pgtype.Text        `json:"discord_link"`
+	MemberCount  int64              `json:"member_count"`
 }
 
 func (q *Queries) GetInvitePreview(ctx context.Context, inviteToken pgtype.UUID) (GetInvitePreviewRow, error) {
@@ -84,16 +108,27 @@ func (q *Queries) GetInvitePreview(ctx context.Context, inviteToken pgtype.UUID)
 	var i GetInvitePreviewRow
 	err := row.Scan(
 		&i.ID,
+		&i.OwnerID,
 		&i.Title,
+		&i.Description,
 		&i.ValueType,
+		&i.RankOrder,
 		&i.IsPublic,
+		&i.InviteToken,
+		&i.CreatedAt,
+		&i.UpdatedAt,
+		&i.Category,
+		&i.Locked,
+		&i.TelegramLink,
+		&i.WhatsappLink,
+		&i.DiscordLink,
 		&i.MemberCount,
 	)
 	return i, err
 }
 
 const getListByID = `-- name: GetListByID :one
-SELECT id, owner_id, title, description, value_type, rank_order, is_public, invite_token, created_at, updated_at FROM lists WHERE id = $1
+SELECT id, owner_id, title, description, value_type, rank_order, is_public, invite_token, created_at, updated_at, category, locked, telegram_link, whatsapp_link, discord_link FROM lists WHERE id = $1
 `
 
 func (q *Queries) GetListByID(ctx context.Context, id pgtype.UUID) (List, error) {
@@ -110,12 +145,17 @@ func (q *Queries) GetListByID(ctx context.Context, id pgtype.UUID) (List, error)
 		&i.InviteToken,
 		&i.CreatedAt,
 		&i.UpdatedAt,
+		&i.Category,
+		&i.Locked,
+		&i.TelegramLink,
+		&i.WhatsappLink,
+		&i.DiscordLink,
 	)
 	return i, err
 }
 
 const getListByInviteToken = `-- name: GetListByInviteToken :one
-SELECT id, owner_id, title, description, value_type, rank_order, is_public, invite_token, created_at, updated_at FROM lists WHERE invite_token = $1
+SELECT id, owner_id, title, description, value_type, rank_order, is_public, invite_token, created_at, updated_at, category, locked, telegram_link, whatsapp_link, discord_link FROM lists WHERE invite_token = $1
 `
 
 func (q *Queries) GetListByInviteToken(ctx context.Context, inviteToken pgtype.UUID) (List, error) {
@@ -132,19 +172,25 @@ func (q *Queries) GetListByInviteToken(ctx context.Context, inviteToken pgtype.U
 		&i.InviteToken,
 		&i.CreatedAt,
 		&i.UpdatedAt,
+		&i.Category,
+		&i.Locked,
+		&i.TelegramLink,
+		&i.WhatsappLink,
+		&i.DiscordLink,
 	)
 	return i, err
 }
 
 const getUserLists = `-- name: GetUserLists :many
 SELECT
-  l.id, l.owner_id, l.title, l.description, l.value_type, l.rank_order, l.is_public, l.invite_token, l.created_at, l.updated_at,
+  l.id, l.owner_id, l.title, l.description, l.value_type, l.rank_order, l.is_public, l.invite_token, l.created_at, l.updated_at, l.category, l.locked, l.telegram_link, l.whatsapp_link, l.discord_link,
   lm.role AS user_role,
   e.id AS own_entry_id,
   e.value_number AS own_entry_value_number,
   e.value_duration_ms AS own_entry_value_duration_ms,
   e.value_text AS own_entry_value_text,
-  e.manual_rank AS own_entry_manual_rank
+  e.manual_rank AS own_entry_manual_rank,
+  (SELECT COUNT(*) FROM list_members WHERE list_id = l.id) AS member_count
 FROM lists l
 JOIN list_members lm ON lm.list_id = l.id AND lm.user_id = $1
 LEFT JOIN entries e ON e.list_id = l.id AND e.user_id = $1
@@ -162,12 +208,18 @@ type GetUserListsRow struct {
 	InviteToken             pgtype.UUID        `json:"invite_token"`
 	CreatedAt               pgtype.Timestamptz `json:"created_at"`
 	UpdatedAt               pgtype.Timestamptz `json:"updated_at"`
+	Category                pgtype.Text        `json:"category"`
+	Locked                  bool               `json:"locked"`
+	TelegramLink            pgtype.Text        `json:"telegram_link"`
+	WhatsappLink            pgtype.Text        `json:"whatsapp_link"`
+	DiscordLink             pgtype.Text        `json:"discord_link"`
 	UserRole                string             `json:"user_role"`
 	OwnEntryID              pgtype.UUID        `json:"own_entry_id"`
 	OwnEntryValueNumber     pgtype.Float8      `json:"own_entry_value_number"`
 	OwnEntryValueDurationMs pgtype.Int8        `json:"own_entry_value_duration_ms"`
 	OwnEntryValueText       pgtype.Text        `json:"own_entry_value_text"`
 	OwnEntryManualRank      pgtype.Int4        `json:"own_entry_manual_rank"`
+	MemberCount             int64              `json:"member_count"`
 }
 
 func (q *Queries) GetUserLists(ctx context.Context, userID pgtype.UUID) ([]GetUserListsRow, error) {
@@ -190,12 +242,107 @@ func (q *Queries) GetUserLists(ctx context.Context, userID pgtype.UUID) ([]GetUs
 			&i.InviteToken,
 			&i.CreatedAt,
 			&i.UpdatedAt,
+			&i.Category,
+			&i.Locked,
+			&i.TelegramLink,
+			&i.WhatsappLink,
+			&i.DiscordLink,
 			&i.UserRole,
 			&i.OwnEntryID,
 			&i.OwnEntryValueNumber,
 			&i.OwnEntryValueDurationMs,
 			&i.OwnEntryValueText,
 			&i.OwnEntryManualRank,
+			&i.MemberCount,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
+const regenerateInviteToken = `-- name: RegenerateInviteToken :one
+UPDATE lists
+SET invite_token = gen_random_uuid(), updated_at = NOW()
+WHERE id = $1
+RETURNING invite_token
+`
+
+func (q *Queries) RegenerateInviteToken(ctx context.Context, id pgtype.UUID) (pgtype.UUID, error) {
+	row := q.db.QueryRow(ctx, regenerateInviteToken, id)
+	var invite_token pgtype.UUID
+	err := row.Scan(&invite_token)
+	return invite_token, err
+}
+
+const searchPublicLists = `-- name: SearchPublicLists :many
+SELECT
+  l.id, l.owner_id, l.title, l.description, l.value_type, l.rank_order, l.is_public, l.invite_token, l.created_at, l.updated_at, l.category, l.locked, l.telegram_link, l.whatsapp_link, l.discord_link,
+  (SELECT COUNT(*) FROM list_members WHERE list_id = l.id) AS member_count
+FROM lists l
+WHERE l.is_public = TRUE
+  AND ($1::TEXT IS NULL
+       OR l.title       ILIKE '%' || $1::TEXT || '%'
+       OR l.description ILIKE '%' || $1::TEXT || '%')
+  AND ($2::TEXT IS NULL OR l.category = $2::TEXT)
+ORDER BY l.updated_at DESC
+LIMIT 100
+`
+
+type SearchPublicListsParams struct {
+	Q        pgtype.Text `json:"q"`
+	Category pgtype.Text `json:"category"`
+}
+
+type SearchPublicListsRow struct {
+	ID           pgtype.UUID        `json:"id"`
+	OwnerID      pgtype.UUID        `json:"owner_id"`
+	Title        string             `json:"title"`
+	Description  pgtype.Text        `json:"description"`
+	ValueType    string             `json:"value_type"`
+	RankOrder    string             `json:"rank_order"`
+	IsPublic     bool               `json:"is_public"`
+	InviteToken  pgtype.UUID        `json:"invite_token"`
+	CreatedAt    pgtype.Timestamptz `json:"created_at"`
+	UpdatedAt    pgtype.Timestamptz `json:"updated_at"`
+	Category     pgtype.Text        `json:"category"`
+	Locked       bool               `json:"locked"`
+	TelegramLink pgtype.Text        `json:"telegram_link"`
+	WhatsappLink pgtype.Text        `json:"whatsapp_link"`
+	DiscordLink  pgtype.Text        `json:"discord_link"`
+	MemberCount  int64              `json:"member_count"`
+}
+
+func (q *Queries) SearchPublicLists(ctx context.Context, arg SearchPublicListsParams) ([]SearchPublicListsRow, error) {
+	rows, err := q.db.Query(ctx, searchPublicLists, arg.Q, arg.Category)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var items []SearchPublicListsRow
+	for rows.Next() {
+		var i SearchPublicListsRow
+		if err := rows.Scan(
+			&i.ID,
+			&i.OwnerID,
+			&i.Title,
+			&i.Description,
+			&i.ValueType,
+			&i.RankOrder,
+			&i.IsPublic,
+			&i.InviteToken,
+			&i.CreatedAt,
+			&i.UpdatedAt,
+			&i.Category,
+			&i.Locked,
+			&i.TelegramLink,
+			&i.WhatsappLink,
+			&i.DiscordLink,
+			&i.MemberCount,
 		); err != nil {
 			return nil, err
 		}
@@ -209,24 +356,43 @@ func (q *Queries) GetUserLists(ctx context.Context, userID pgtype.UUID) ([]GetUs
 
 const updateList = `-- name: UpdateList :one
 UPDATE lists
-SET title = $2, description = $3, is_public = $4, updated_at = NOW()
-WHERE id = $1
-RETURNING id, owner_id, title, description, value_type, rank_order, is_public, invite_token, created_at, updated_at
+SET
+  title         = COALESCE($1,         title),
+  description   = COALESCE($2,   description),
+  is_public     = COALESCE($3,     is_public),
+  locked        = COALESCE($4,        locked),
+  category      = COALESCE($5,      category),
+  telegram_link = COALESCE($6, telegram_link),
+  whatsapp_link = COALESCE($7, whatsapp_link),
+  discord_link  = COALESCE($8,  discord_link),
+  updated_at    = NOW()
+WHERE id = $9
+RETURNING id, owner_id, title, description, value_type, rank_order, is_public, invite_token, created_at, updated_at, category, locked, telegram_link, whatsapp_link, discord_link
 `
 
 type UpdateListParams struct {
-	ID          pgtype.UUID `json:"id"`
-	Title       string      `json:"title"`
-	Description pgtype.Text `json:"description"`
-	IsPublic    bool        `json:"is_public"`
+	Title        pgtype.Text `json:"title"`
+	Description  pgtype.Text `json:"description"`
+	IsPublic     pgtype.Bool `json:"is_public"`
+	Locked       pgtype.Bool `json:"locked"`
+	Category     pgtype.Text `json:"category"`
+	TelegramLink pgtype.Text `json:"telegram_link"`
+	WhatsappLink pgtype.Text `json:"whatsapp_link"`
+	DiscordLink  pgtype.Text `json:"discord_link"`
+	ID           pgtype.UUID `json:"id"`
 }
 
 func (q *Queries) UpdateList(ctx context.Context, arg UpdateListParams) (List, error) {
 	row := q.db.QueryRow(ctx, updateList,
-		arg.ID,
 		arg.Title,
 		arg.Description,
 		arg.IsPublic,
+		arg.Locked,
+		arg.Category,
+		arg.TelegramLink,
+		arg.WhatsappLink,
+		arg.DiscordLink,
+		arg.ID,
 	)
 	var i List
 	err := row.Scan(
@@ -240,6 +406,11 @@ func (q *Queries) UpdateList(ctx context.Context, arg UpdateListParams) (List, e
 		&i.InviteToken,
 		&i.CreatedAt,
 		&i.UpdatedAt,
+		&i.Category,
+		&i.Locked,
+		&i.TelegramLink,
+		&i.WhatsappLink,
+		&i.DiscordLink,
 	)
 	return i, err
 }

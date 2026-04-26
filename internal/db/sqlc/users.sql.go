@@ -67,6 +67,91 @@ func (q *Queries) CreateUser(ctx context.Context, arg CreateUserParams) (User, e
 	return i, err
 }
 
+const getPublicBoardsForUser = `-- name: GetPublicBoardsForUser :many
+SELECT
+  l.id, l.owner_id, l.title, l.description, l.value_type, l.rank_order, l.is_public, l.invite_token, l.created_at, l.updated_at, l.category, l.locked, l.telegram_link, l.whatsapp_link, l.discord_link,
+  lm.role AS user_role,
+  e.id AS own_entry_id,
+  e.value_number AS own_entry_value_number,
+  e.value_duration_ms AS own_entry_value_duration_ms,
+  e.value_text AS own_entry_value_text,
+  e.manual_rank AS own_entry_manual_rank,
+  (SELECT COUNT(*) FROM list_members WHERE list_id = l.id) AS member_count
+FROM lists l
+JOIN list_members lm ON lm.list_id = l.id AND lm.user_id = $1
+LEFT JOIN entries e ON e.list_id = l.id AND e.user_id = $1
+WHERE l.is_public = TRUE
+ORDER BY l.updated_at DESC
+`
+
+type GetPublicBoardsForUserRow struct {
+	ID                      pgtype.UUID        `json:"id"`
+	OwnerID                 pgtype.UUID        `json:"owner_id"`
+	Title                   string             `json:"title"`
+	Description             pgtype.Text        `json:"description"`
+	ValueType               string             `json:"value_type"`
+	RankOrder               string             `json:"rank_order"`
+	IsPublic                bool               `json:"is_public"`
+	InviteToken             pgtype.UUID        `json:"invite_token"`
+	CreatedAt               pgtype.Timestamptz `json:"created_at"`
+	UpdatedAt               pgtype.Timestamptz `json:"updated_at"`
+	Category                pgtype.Text        `json:"category"`
+	Locked                  bool               `json:"locked"`
+	TelegramLink            pgtype.Text        `json:"telegram_link"`
+	WhatsappLink            pgtype.Text        `json:"whatsapp_link"`
+	DiscordLink             pgtype.Text        `json:"discord_link"`
+	UserRole                string             `json:"user_role"`
+	OwnEntryID              pgtype.UUID        `json:"own_entry_id"`
+	OwnEntryValueNumber     pgtype.Float8      `json:"own_entry_value_number"`
+	OwnEntryValueDurationMs pgtype.Int8        `json:"own_entry_value_duration_ms"`
+	OwnEntryValueText       pgtype.Text        `json:"own_entry_value_text"`
+	OwnEntryManualRank      pgtype.Int4        `json:"own_entry_manual_rank"`
+	MemberCount             int64              `json:"member_count"`
+}
+
+func (q *Queries) GetPublicBoardsForUser(ctx context.Context, userID pgtype.UUID) ([]GetPublicBoardsForUserRow, error) {
+	rows, err := q.db.Query(ctx, getPublicBoardsForUser, userID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var items []GetPublicBoardsForUserRow
+	for rows.Next() {
+		var i GetPublicBoardsForUserRow
+		if err := rows.Scan(
+			&i.ID,
+			&i.OwnerID,
+			&i.Title,
+			&i.Description,
+			&i.ValueType,
+			&i.RankOrder,
+			&i.IsPublic,
+			&i.InviteToken,
+			&i.CreatedAt,
+			&i.UpdatedAt,
+			&i.Category,
+			&i.Locked,
+			&i.TelegramLink,
+			&i.WhatsappLink,
+			&i.DiscordLink,
+			&i.UserRole,
+			&i.OwnEntryID,
+			&i.OwnEntryValueNumber,
+			&i.OwnEntryValueDurationMs,
+			&i.OwnEntryValueText,
+			&i.OwnEntryManualRank,
+			&i.MemberCount,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
 const getUserByAppleSub = `-- name: GetUserByAppleSub :one
 SELECT id, email, display_name, auth_provider, apple_sub, password_hash, avatar_url, created_at FROM users WHERE apple_sub = $1
 `
@@ -123,6 +208,40 @@ func (q *Queries) GetUserByID(ctx context.Context, id pgtype.UUID) (User, error)
 		&i.PasswordHash,
 		&i.AvatarUrl,
 		&i.CreatedAt,
+	)
+	return i, err
+}
+
+const getUserProfile = `-- name: GetUserProfile :one
+SELECT
+  u.id,
+  u.display_name,
+  u.avatar_url,
+  u.created_at,
+  (SELECT COUNT(*) FROM list_members lm
+     JOIN lists l ON l.id = lm.list_id
+     WHERE lm.user_id = u.id AND l.is_public = TRUE) AS public_board_count
+FROM users u
+WHERE u.id = $1
+`
+
+type GetUserProfileRow struct {
+	ID               pgtype.UUID        `json:"id"`
+	DisplayName      string             `json:"display_name"`
+	AvatarUrl        pgtype.Text        `json:"avatar_url"`
+	CreatedAt        pgtype.Timestamptz `json:"created_at"`
+	PublicBoardCount int64              `json:"public_board_count"`
+}
+
+func (q *Queries) GetUserProfile(ctx context.Context, id pgtype.UUID) (GetUserProfileRow, error) {
+	row := q.db.QueryRow(ctx, getUserProfile, id)
+	var i GetUserProfileRow
+	err := row.Scan(
+		&i.ID,
+		&i.DisplayName,
+		&i.AvatarUrl,
+		&i.CreatedAt,
+		&i.PublicBoardCount,
 	)
 	return i, err
 }

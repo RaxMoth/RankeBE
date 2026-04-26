@@ -11,6 +11,21 @@ import (
 	"github.com/jackc/pgx/v5/pgtype"
 )
 
+const approveEntry = `-- name: ApproveEntry :exec
+UPDATE entries SET status = 'approved', updated_at = NOW()
+WHERE id = $1 AND list_id = $2
+`
+
+type ApproveEntryParams struct {
+	ID     pgtype.UUID `json:"id"`
+	ListID pgtype.UUID `json:"list_id"`
+}
+
+func (q *Queries) ApproveEntry(ctx context.Context, arg ApproveEntryParams) error {
+	_, err := q.db.Exec(ctx, approveEntry, arg.ID, arg.ListID)
+	return err
+}
+
 const deleteEntry = `-- name: DeleteEntry :exec
 DELETE FROM entries WHERE id = $1
 `
@@ -34,15 +49,206 @@ func (q *Queries) DeleteEntryByListAndUser(ctx context.Context, arg DeleteEntryB
 	return err
 }
 
+const getCurrentRankByDuration = `-- name: GetCurrentRankByDuration :one
+SELECT rank::INT AS rank FROM (
+  SELECT user_id, ROW_NUMBER() OVER (ORDER BY value_duration_ms ASC NULLS LAST) AS rank
+  FROM entries WHERE list_id = $1 AND status = 'approved'
+) r WHERE user_id = $2
+`
+
+type GetCurrentRankByDurationParams struct {
+	ListID pgtype.UUID `json:"list_id"`
+	UserID pgtype.UUID `json:"user_id"`
+}
+
+func (q *Queries) GetCurrentRankByDuration(ctx context.Context, arg GetCurrentRankByDurationParams) (int32, error) {
+	row := q.db.QueryRow(ctx, getCurrentRankByDuration, arg.ListID, arg.UserID)
+	var rank int32
+	err := row.Scan(&rank)
+	return rank, err
+}
+
+const getCurrentRankByDurationDesc = `-- name: GetCurrentRankByDurationDesc :one
+SELECT rank::INT AS rank FROM (
+  SELECT user_id, ROW_NUMBER() OVER (ORDER BY value_duration_ms DESC NULLS LAST) AS rank
+  FROM entries WHERE list_id = $1 AND status = 'approved'
+) r WHERE user_id = $2
+`
+
+type GetCurrentRankByDurationDescParams struct {
+	ListID pgtype.UUID `json:"list_id"`
+	UserID pgtype.UUID `json:"user_id"`
+}
+
+func (q *Queries) GetCurrentRankByDurationDesc(ctx context.Context, arg GetCurrentRankByDurationDescParams) (int32, error) {
+	row := q.db.QueryRow(ctx, getCurrentRankByDurationDesc, arg.ListID, arg.UserID)
+	var rank int32
+	err := row.Scan(&rank)
+	return rank, err
+}
+
+const getCurrentRankByNumber = `-- name: GetCurrentRankByNumber :one
+
+SELECT rank::INT AS rank FROM (
+  SELECT user_id, ROW_NUMBER() OVER (ORDER BY value_number ASC NULLS LAST) AS rank
+  FROM entries WHERE list_id = $1 AND status = 'approved'
+) r WHERE user_id = $2
+`
+
+type GetCurrentRankByNumberParams struct {
+	ListID pgtype.UUID `json:"list_id"`
+	UserID pgtype.UUID `json:"user_id"`
+}
+
+// ── current rank lookups (used to populate previous_rank on upsert) ──
+func (q *Queries) GetCurrentRankByNumber(ctx context.Context, arg GetCurrentRankByNumberParams) (int32, error) {
+	row := q.db.QueryRow(ctx, getCurrentRankByNumber, arg.ListID, arg.UserID)
+	var rank int32
+	err := row.Scan(&rank)
+	return rank, err
+}
+
+const getCurrentRankByNumberDesc = `-- name: GetCurrentRankByNumberDesc :one
+SELECT rank::INT AS rank FROM (
+  SELECT user_id, ROW_NUMBER() OVER (ORDER BY value_number DESC NULLS LAST) AS rank
+  FROM entries WHERE list_id = $1 AND status = 'approved'
+) r WHERE user_id = $2
+`
+
+type GetCurrentRankByNumberDescParams struct {
+	ListID pgtype.UUID `json:"list_id"`
+	UserID pgtype.UUID `json:"user_id"`
+}
+
+func (q *Queries) GetCurrentRankByNumberDesc(ctx context.Context, arg GetCurrentRankByNumberDescParams) (int32, error) {
+	row := q.db.QueryRow(ctx, getCurrentRankByNumberDesc, arg.ListID, arg.UserID)
+	var rank int32
+	err := row.Scan(&rank)
+	return rank, err
+}
+
+const getCurrentRankByText = `-- name: GetCurrentRankByText :one
+SELECT rank::INT AS rank FROM (
+  SELECT user_id, ROW_NUMBER() OVER (ORDER BY manual_rank ASC NULLS LAST) AS rank
+  FROM entries WHERE list_id = $1 AND status = 'approved'
+) r WHERE user_id = $2
+`
+
+type GetCurrentRankByTextParams struct {
+	ListID pgtype.UUID `json:"list_id"`
+	UserID pgtype.UUID `json:"user_id"`
+}
+
+func (q *Queries) GetCurrentRankByText(ctx context.Context, arg GetCurrentRankByTextParams) (int32, error) {
+	row := q.db.QueryRow(ctx, getCurrentRankByText, arg.ListID, arg.UserID)
+	var rank int32
+	err := row.Scan(&rank)
+	return rank, err
+}
+
+const getEntryByListAndUser = `-- name: GetEntryByListAndUser :one
+SELECT id, list_id, user_id, value_number, value_duration_ms, value_text, manual_rank, note, submitted_at, updated_at, status, previous_rank FROM entries WHERE list_id = $1 AND user_id = $2
+`
+
+type GetEntryByListAndUserParams struct {
+	ListID pgtype.UUID `json:"list_id"`
+	UserID pgtype.UUID `json:"user_id"`
+}
+
+func (q *Queries) GetEntryByListAndUser(ctx context.Context, arg GetEntryByListAndUserParams) (Entry, error) {
+	row := q.db.QueryRow(ctx, getEntryByListAndUser, arg.ListID, arg.UserID)
+	var i Entry
+	err := row.Scan(
+		&i.ID,
+		&i.ListID,
+		&i.UserID,
+		&i.ValueNumber,
+		&i.ValueDurationMs,
+		&i.ValueText,
+		&i.ManualRank,
+		&i.Note,
+		&i.SubmittedAt,
+		&i.UpdatedAt,
+		&i.Status,
+		&i.PreviousRank,
+	)
+	return i, err
+}
+
+const getPendingEntries = `-- name: GetPendingEntries :many
+
+SELECT
+  e.id, e.list_id, e.user_id, e.value_number, e.value_duration_ms, e.value_text, e.manual_rank, e.note, e.submitted_at, e.updated_at, e.status, e.previous_rank,
+  u.display_name,
+  u.avatar_url
+FROM entries e
+JOIN users u ON u.id = e.user_id
+WHERE e.list_id = $1 AND e.status = 'pending'
+ORDER BY e.submitted_at ASC
+`
+
+type GetPendingEntriesRow struct {
+	ID              pgtype.UUID        `json:"id"`
+	ListID          pgtype.UUID        `json:"list_id"`
+	UserID          pgtype.UUID        `json:"user_id"`
+	ValueNumber     pgtype.Float8      `json:"value_number"`
+	ValueDurationMs pgtype.Int8        `json:"value_duration_ms"`
+	ValueText       pgtype.Text        `json:"value_text"`
+	ManualRank      pgtype.Int4        `json:"manual_rank"`
+	Note            pgtype.Text        `json:"note"`
+	SubmittedAt     pgtype.Timestamptz `json:"submitted_at"`
+	UpdatedAt       pgtype.Timestamptz `json:"updated_at"`
+	Status          string             `json:"status"`
+	PreviousRank    pgtype.Int4        `json:"previous_rank"`
+	DisplayName     string             `json:"display_name"`
+	AvatarUrl       pgtype.Text        `json:"avatar_url"`
+}
+
+// ── moderation feed ──────────────────────────────────────────────────
+func (q *Queries) GetPendingEntries(ctx context.Context, listID pgtype.UUID) ([]GetPendingEntriesRow, error) {
+	rows, err := q.db.Query(ctx, getPendingEntries, listID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var items []GetPendingEntriesRow
+	for rows.Next() {
+		var i GetPendingEntriesRow
+		if err := rows.Scan(
+			&i.ID,
+			&i.ListID,
+			&i.UserID,
+			&i.ValueNumber,
+			&i.ValueDurationMs,
+			&i.ValueText,
+			&i.ManualRank,
+			&i.Note,
+			&i.SubmittedAt,
+			&i.UpdatedAt,
+			&i.Status,
+			&i.PreviousRank,
+			&i.DisplayName,
+			&i.AvatarUrl,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
 const getRankedEntriesByDuration = `-- name: GetRankedEntriesByDuration :many
 SELECT
-  e.id, e.list_id, e.user_id, e.value_number, e.value_duration_ms, e.value_text, e.manual_rank, e.note, e.submitted_at, e.updated_at,
+  e.id, e.list_id, e.user_id, e.value_number, e.value_duration_ms, e.value_text, e.manual_rank, e.note, e.submitted_at, e.updated_at, e.status, e.previous_rank,
   u.display_name,
   u.avatar_url,
   ROW_NUMBER() OVER (ORDER BY e.value_duration_ms ASC NULLS LAST) AS rank
 FROM entries e
 JOIN users u ON u.id = e.user_id
-WHERE e.list_id = $1
+WHERE e.list_id = $1 AND e.status = 'approved'
 ORDER BY rank ASC
 `
 
@@ -57,6 +263,8 @@ type GetRankedEntriesByDurationRow struct {
 	Note            pgtype.Text        `json:"note"`
 	SubmittedAt     pgtype.Timestamptz `json:"submitted_at"`
 	UpdatedAt       pgtype.Timestamptz `json:"updated_at"`
+	Status          string             `json:"status"`
+	PreviousRank    pgtype.Int4        `json:"previous_rank"`
 	DisplayName     string             `json:"display_name"`
 	AvatarUrl       pgtype.Text        `json:"avatar_url"`
 	Rank            int64              `json:"rank"`
@@ -82,6 +290,8 @@ func (q *Queries) GetRankedEntriesByDuration(ctx context.Context, listID pgtype.
 			&i.Note,
 			&i.SubmittedAt,
 			&i.UpdatedAt,
+			&i.Status,
+			&i.PreviousRank,
 			&i.DisplayName,
 			&i.AvatarUrl,
 			&i.Rank,
@@ -98,13 +308,13 @@ func (q *Queries) GetRankedEntriesByDuration(ctx context.Context, listID pgtype.
 
 const getRankedEntriesByDurationDesc = `-- name: GetRankedEntriesByDurationDesc :many
 SELECT
-  e.id, e.list_id, e.user_id, e.value_number, e.value_duration_ms, e.value_text, e.manual_rank, e.note, e.submitted_at, e.updated_at,
+  e.id, e.list_id, e.user_id, e.value_number, e.value_duration_ms, e.value_text, e.manual_rank, e.note, e.submitted_at, e.updated_at, e.status, e.previous_rank,
   u.display_name,
   u.avatar_url,
   ROW_NUMBER() OVER (ORDER BY e.value_duration_ms DESC NULLS LAST) AS rank
 FROM entries e
 JOIN users u ON u.id = e.user_id
-WHERE e.list_id = $1
+WHERE e.list_id = $1 AND e.status = 'approved'
 ORDER BY rank ASC
 `
 
@@ -119,6 +329,8 @@ type GetRankedEntriesByDurationDescRow struct {
 	Note            pgtype.Text        `json:"note"`
 	SubmittedAt     pgtype.Timestamptz `json:"submitted_at"`
 	UpdatedAt       pgtype.Timestamptz `json:"updated_at"`
+	Status          string             `json:"status"`
+	PreviousRank    pgtype.Int4        `json:"previous_rank"`
 	DisplayName     string             `json:"display_name"`
 	AvatarUrl       pgtype.Text        `json:"avatar_url"`
 	Rank            int64              `json:"rank"`
@@ -144,6 +356,8 @@ func (q *Queries) GetRankedEntriesByDurationDesc(ctx context.Context, listID pgt
 			&i.Note,
 			&i.SubmittedAt,
 			&i.UpdatedAt,
+			&i.Status,
+			&i.PreviousRank,
 			&i.DisplayName,
 			&i.AvatarUrl,
 			&i.Rank,
@@ -159,14 +373,15 @@ func (q *Queries) GetRankedEntriesByDurationDesc(ctx context.Context, listID pgt
 }
 
 const getRankedEntriesByNumber = `-- name: GetRankedEntriesByNumber :many
+
 SELECT
-  e.id, e.list_id, e.user_id, e.value_number, e.value_duration_ms, e.value_text, e.manual_rank, e.note, e.submitted_at, e.updated_at,
+  e.id, e.list_id, e.user_id, e.value_number, e.value_duration_ms, e.value_text, e.manual_rank, e.note, e.submitted_at, e.updated_at, e.status, e.previous_rank,
   u.display_name,
   u.avatar_url,
   ROW_NUMBER() OVER (ORDER BY e.value_number ASC NULLS LAST) AS rank
 FROM entries e
 JOIN users u ON u.id = e.user_id
-WHERE e.list_id = $1
+WHERE e.list_id = $1 AND e.status = 'approved'
 ORDER BY rank ASC
 `
 
@@ -181,11 +396,14 @@ type GetRankedEntriesByNumberRow struct {
 	Note            pgtype.Text        `json:"note"`
 	SubmittedAt     pgtype.Timestamptz `json:"submitted_at"`
 	UpdatedAt       pgtype.Timestamptz `json:"updated_at"`
+	Status          string             `json:"status"`
+	PreviousRank    pgtype.Int4        `json:"previous_rank"`
 	DisplayName     string             `json:"display_name"`
 	AvatarUrl       pgtype.Text        `json:"avatar_url"`
 	Rank            int64              `json:"rank"`
 }
 
+// ── ranked feeds (only "approved" entries are ranked) ────────────────
 func (q *Queries) GetRankedEntriesByNumber(ctx context.Context, listID pgtype.UUID) ([]GetRankedEntriesByNumberRow, error) {
 	rows, err := q.db.Query(ctx, getRankedEntriesByNumber, listID)
 	if err != nil {
@@ -206,6 +424,8 @@ func (q *Queries) GetRankedEntriesByNumber(ctx context.Context, listID pgtype.UU
 			&i.Note,
 			&i.SubmittedAt,
 			&i.UpdatedAt,
+			&i.Status,
+			&i.PreviousRank,
 			&i.DisplayName,
 			&i.AvatarUrl,
 			&i.Rank,
@@ -222,13 +442,13 @@ func (q *Queries) GetRankedEntriesByNumber(ctx context.Context, listID pgtype.UU
 
 const getRankedEntriesByNumberDesc = `-- name: GetRankedEntriesByNumberDesc :many
 SELECT
-  e.id, e.list_id, e.user_id, e.value_number, e.value_duration_ms, e.value_text, e.manual_rank, e.note, e.submitted_at, e.updated_at,
+  e.id, e.list_id, e.user_id, e.value_number, e.value_duration_ms, e.value_text, e.manual_rank, e.note, e.submitted_at, e.updated_at, e.status, e.previous_rank,
   u.display_name,
   u.avatar_url,
   ROW_NUMBER() OVER (ORDER BY e.value_number DESC NULLS LAST) AS rank
 FROM entries e
 JOIN users u ON u.id = e.user_id
-WHERE e.list_id = $1
+WHERE e.list_id = $1 AND e.status = 'approved'
 ORDER BY rank ASC
 `
 
@@ -243,6 +463,8 @@ type GetRankedEntriesByNumberDescRow struct {
 	Note            pgtype.Text        `json:"note"`
 	SubmittedAt     pgtype.Timestamptz `json:"submitted_at"`
 	UpdatedAt       pgtype.Timestamptz `json:"updated_at"`
+	Status          string             `json:"status"`
+	PreviousRank    pgtype.Int4        `json:"previous_rank"`
 	DisplayName     string             `json:"display_name"`
 	AvatarUrl       pgtype.Text        `json:"avatar_url"`
 	Rank            int64              `json:"rank"`
@@ -268,6 +490,8 @@ func (q *Queries) GetRankedEntriesByNumberDesc(ctx context.Context, listID pgtyp
 			&i.Note,
 			&i.SubmittedAt,
 			&i.UpdatedAt,
+			&i.Status,
+			&i.PreviousRank,
 			&i.DisplayName,
 			&i.AvatarUrl,
 			&i.Rank,
@@ -284,13 +508,13 @@ func (q *Queries) GetRankedEntriesByNumberDesc(ctx context.Context, listID pgtyp
 
 const getRankedEntriesByText = `-- name: GetRankedEntriesByText :many
 SELECT
-  e.id, e.list_id, e.user_id, e.value_number, e.value_duration_ms, e.value_text, e.manual_rank, e.note, e.submitted_at, e.updated_at,
+  e.id, e.list_id, e.user_id, e.value_number, e.value_duration_ms, e.value_text, e.manual_rank, e.note, e.submitted_at, e.updated_at, e.status, e.previous_rank,
   u.display_name,
   u.avatar_url,
   ROW_NUMBER() OVER (ORDER BY e.manual_rank ASC NULLS LAST) AS rank
 FROM entries e
 JOIN users u ON u.id = e.user_id
-WHERE e.list_id = $1
+WHERE e.list_id = $1 AND e.status = 'approved'
 ORDER BY rank ASC
 `
 
@@ -305,6 +529,8 @@ type GetRankedEntriesByTextRow struct {
 	Note            pgtype.Text        `json:"note"`
 	SubmittedAt     pgtype.Timestamptz `json:"submitted_at"`
 	UpdatedAt       pgtype.Timestamptz `json:"updated_at"`
+	Status          string             `json:"status"`
+	PreviousRank    pgtype.Int4        `json:"previous_rank"`
 	DisplayName     string             `json:"display_name"`
 	AvatarUrl       pgtype.Text        `json:"avatar_url"`
 	Rank            int64              `json:"rank"`
@@ -330,6 +556,8 @@ func (q *Queries) GetRankedEntriesByText(ctx context.Context, listID pgtype.UUID
 			&i.Note,
 			&i.SubmittedAt,
 			&i.UpdatedAt,
+			&i.Status,
+			&i.PreviousRank,
 			&i.DisplayName,
 			&i.AvatarUrl,
 			&i.Rank,
@@ -342,6 +570,21 @@ func (q *Queries) GetRankedEntriesByText(ctx context.Context, listID pgtype.UUID
 		return nil, err
 	}
 	return items, nil
+}
+
+const rejectEntry = `-- name: RejectEntry :exec
+UPDATE entries SET status = 'rejected', updated_at = NOW()
+WHERE id = $1 AND list_id = $2
+`
+
+type RejectEntryParams struct {
+	ID     pgtype.UUID `json:"id"`
+	ListID pgtype.UUID `json:"list_id"`
+}
+
+func (q *Queries) RejectEntry(ctx context.Context, arg RejectEntryParams) error {
+	_, err := q.db.Exec(ctx, rejectEntry, arg.ID, arg.ListID)
+	return err
 }
 
 const updateEntryManualRank = `-- name: UpdateEntryManualRank :exec
@@ -359,16 +602,22 @@ func (q *Queries) UpdateEntryManualRank(ctx context.Context, arg UpdateEntryManu
 }
 
 const upsertEntry = `-- name: UpsertEntry :one
-INSERT INTO entries (list_id, user_id, value_number, value_duration_ms, value_text, note, updated_at)
-VALUES ($1, $2, $3, $4, $5, $6, NOW())
+INSERT INTO entries (
+  list_id, user_id,
+  value_number, value_duration_ms, value_text,
+  note, status, previous_rank, updated_at
+)
+VALUES ($1, $2, $3, $4, $5, $6, $7, $8, NOW())
 ON CONFLICT (list_id, user_id)
 DO UPDATE SET
   value_number      = EXCLUDED.value_number,
   value_duration_ms = EXCLUDED.value_duration_ms,
   value_text        = EXCLUDED.value_text,
   note              = EXCLUDED.note,
+  status            = EXCLUDED.status,
+  previous_rank     = EXCLUDED.previous_rank,
   updated_at        = NOW()
-RETURNING id, list_id, user_id, value_number, value_duration_ms, value_text, manual_rank, note, submitted_at, updated_at
+RETURNING id, list_id, user_id, value_number, value_duration_ms, value_text, manual_rank, note, submitted_at, updated_at, status, previous_rank
 `
 
 type UpsertEntryParams struct {
@@ -378,6 +627,8 @@ type UpsertEntryParams struct {
 	ValueDurationMs pgtype.Int8   `json:"value_duration_ms"`
 	ValueText       pgtype.Text   `json:"value_text"`
 	Note            pgtype.Text   `json:"note"`
+	Status          string        `json:"status"`
+	PreviousRank    pgtype.Int4   `json:"previous_rank"`
 }
 
 func (q *Queries) UpsertEntry(ctx context.Context, arg UpsertEntryParams) (Entry, error) {
@@ -388,6 +639,8 @@ func (q *Queries) UpsertEntry(ctx context.Context, arg UpsertEntryParams) (Entry
 		arg.ValueDurationMs,
 		arg.ValueText,
 		arg.Note,
+		arg.Status,
+		arg.PreviousRank,
 	)
 	var i Entry
 	err := row.Scan(
@@ -401,6 +654,8 @@ func (q *Queries) UpsertEntry(ctx context.Context, arg UpsertEntryParams) (Entry
 		&i.Note,
 		&i.SubmittedAt,
 		&i.UpdatedAt,
+		&i.Status,
+		&i.PreviousRank,
 	)
 	return i, err
 }

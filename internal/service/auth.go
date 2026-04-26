@@ -81,7 +81,13 @@ func (s *AuthService) Login(ctx context.Context, email, password string) (*db.Us
 	return &user, pair, nil
 }
 
-func (s *AuthService) AppleSignIn(ctx context.Context, identityToken string) (*db.User, *TokenPair, error) {
+// AppleSignIn verifies an Apple identity token and returns/creates the matching user.
+//
+// `fullName` is supplied by the iOS Sign-In flow only on the *first* sign-in
+// attempt for a given Apple ID; it is empty on subsequent attempts. We use it
+// as the display name when creating the row, falling back to the email's
+// local-part otherwise.
+func (s *AuthService) AppleSignIn(ctx context.Context, identityToken, fullName string) (*db.User, *TokenPair, error) {
 	if s.appleVerifier == nil {
 		return nil, nil, errors.New("apple sign-in not configured")
 	}
@@ -107,8 +113,9 @@ func (s *AuthService) AppleSignIn(ctx context.Context, identityToken string) (*d
 	if email == "" {
 		email = claims.Subject + "@privaterelay.appleid.com"
 	}
-	displayName := email
-	if idx := len(email); idx > 0 {
+	displayName := fullName
+	if displayName == "" {
+		displayName = email
 		for i, c := range email {
 			if c == '@' {
 				displayName = email[:i]
