@@ -1,426 +1,196 @@
-# REST API Template with Gin Framework
+# Ranke Backend
 
-A production-ready REST API template built with Go and Gin framework. This template supports both MySQL and Firebase as database backends, includes JWT authentication, rate limiting, request logging, CORS middleware, and comes with Swagger documentation.
+Go + Gin + PostgreSQL API for the Ranke / Apex iOS app
+([../RankeMobile](../RankeMobile)).
 
-## Features
+The wire contract — paths, JSON keys, error codes — is the source of truth
+for the Flutter client. See `internal/handler/dto/` and the API map below.
 
-- ✅ **Clean Architecture** - Separation of concerns with handlers, services, and repositories
-- ✅ **Database Agnostic** - Support for both MySQL and Firebase
-- ✅ **JWT Authentication** - Secure authentication with access and refresh tokens
-- ✅ **Rate Limiting** - IP-based rate limiting to prevent abuse
-- ✅ **Request Logging** - Comprehensive request/response logging
-- ✅ **CORS Support** - Cross-Origin Resource Sharing middleware
-- ✅ **Swagger Documentation** - Auto-generated API documentation
-- ✅ **Docker Support** - Containerized deployment with Docker Compose
-- ✅ **Database Migrations** - Version-controlled database schema
-- ✅ **Graceful Shutdown** - Proper server shutdown handling
-- ✅ **Environment Configuration** - Easy configuration via environment variables
-- ✅ **Pagination** - Built-in pagination support for list endpoints
-- ✅ **Error Handling** - Consistent error responses
-- ✅ **Input Validation** - Request validation using binding tags
+## Stack
 
-## Project Structure
+- Go 1.24, Gin
+- PostgreSQL via `pgx/v5` + `pgxpool`
+- Generated DB layer with [sqlc](https://sqlc.dev/) (`internal/db/sqlc`)
+- JWT (HS256) access tokens + opaque refresh tokens stored in DB
+- Sign in with Apple — verifies Apple JWKS server-side
+
+## Layout
 
 ```
-gin-rest-template/
-├── cmd/
-│   └── api/
-│       └── main.go              # Application entry point
-├── internal/
-│   ├── config/
-│   │   └── config.go            # Configuration management
-│   ├── handlers/
-│   │   └── handlers.go          # HTTP request handlers
-│   ├── middleware/
-│   │   ├── auth.go              # JWT authentication middleware
-│   │   ├── cors.go              # CORS middleware
-│   │   ├── logger.go            # Request logging middleware
-│   │   └── rate_limiter.go      # Rate limiting middleware
-│   ├── models/
-│   │   └── models.go            # Data models and DTOs
-│   ├── repository/
-│   │   ├── repository.go        # Repository interface
-│   │   ├── mysql_repository.go  # MySQL implementation
-│   │   └── firebase_repository.go # Firebase implementation
-│   └── service/
-│       └── service.go           # Business logic layer
-├── pkg/
-│   └── logger/
-│       └── logger.go            # Logger package
-├── migrations/                   # Database migrations
-├── docs/                        # Swagger documentation
-├── .env.example                 # Example environment variables
-├── .gitignore
-├── docker-compose.yml
-├── Dockerfile
-├── Makefile
-├── go.mod
-└── README.md
+cmd/server/             entry point + router wiring
+internal/
+  apple/                Apple identity-token verifier (JWKS cache)
+  config/               env loader (DATABASE_URL, JWT_SECRET, ...)
+  db/
+    migrations/         001_init.sql, 002_lists_and_entries_extensions.sql
+    queries/            sqlc input — *.sql files
+    sqlc/               generated query code (do NOT edit by hand)
+  handler/              HTTP handlers (one file per resource)
+    dto/                wire DTOs + sqlc-row mappers (camelCase)
+  middleware/           AuthRequired, RequireListRole, RequireListMember
+  service/              business logic (transactions, validation)
+sqlc.yaml               sqlc config
 ```
 
-## Getting Started
+The handler layer never serializes a sqlc row directly — every response
+goes through a DTO mapper in `internal/handler/dto/`.
 
-> **Quick Start**: For detailed local development setup instructions, see [LOCAL_SETUP.md](docs/LOCAL_SETUP.md)
+## Response envelope
 
-### Prerequisites
-
-- Go 1.21 or higher
-- Docker and Docker Compose (optional)
-- MySQL 8.0 or higher (if using MySQL)
-- Firebase project and credentials (if using Firebase)
-
-### Installation
-
-1. **Clone the repository**
-
-```bash
-git clone https://github.com/yourusername/gin-rest-template.git
-cd gin-rest-template
-```
-
-2. **Install dependencies**
-
-```bash
-make install
-# or
-go mod download
-```
-
-3. **Set up environment variables**
-
-```bash
-cp .env.example .env
-```
-
-Edit `.env` with your configuration:
-
-```env
-# For MySQL
-DATABASE_TYPE=mysql
-MYSQL_HOST=localhost
-MYSQL_PORT=3306
-MYSQL_USER=root
-MYSQL_PASSWORD=yourpassword
-MYSQL_DATABASE=gin_rest_db
-
-# For Firebase
-DATABASE_TYPE=firebase
-FIREBASE_PROJECT_ID=your-project-id
-FIREBASE_CREDENTIALS=./serviceAccountKey.json
-```
-
-### Running the Application
-
-#### Option 1: Run Locally
-
-```bash
-make run
-# or
-go run cmd/api/main.go
-```
-
-#### Option 2: Run with Docker
-
-```bash
-# Build and start containers
-make docker-up
-
-# View logs
-make docker-logs
-
-# Stop containers
-make docker-down
-```
-
-The API will be available at `http://localhost:8080`
-
-## API Endpoints
-
-### Authentication
-
-| Method | Endpoint                | Description          | Auth Required |
-| ------ | ----------------------- | -------------------- | ------------- |
-| POST   | `/api/v1/auth/register` | Register new user    | No            |
-| POST   | `/api/v1/auth/login`    | Login user           | No            |
-| POST   | `/api/v1/auth/refresh`  | Refresh access token | No            |
-
-### Users
-
-| Method | Endpoint           | Description         | Auth Required |
-| ------ | ------------------ | ------------------- | ------------- |
-| GET    | `/api/v1/users/me` | Get current user    | Yes           |
-| PUT    | `/api/v1/users/me` | Update current user | Yes           |
-
-### Albums (Example Resource)
-
-| Method | Endpoint             | Description      | Auth Required |
-| ------ | -------------------- | ---------------- | ------------- |
-| GET    | `/api/v1/albums`     | Get all albums   | Yes           |
-| GET    | `/api/v1/albums/:id` | Get album by ID  | Yes           |
-| POST   | `/api/v1/albums`     | Create new album | Yes           |
-| PUT    | `/api/v1/albums/:id` | Update album     | Yes           |
-| DELETE | `/api/v1/albums/:id` | Delete album     | Yes           |
-
-### Health Check
-
-| Method | Endpoint  | Description  | Auth Required |
-| ------ | --------- | ------------ | ------------- |
-| GET    | `/health` | Health check | No            |
-
-## API Usage Examples
-
-### Register a new user
-
-```bash
-curl -X POST http://localhost:8080/api/v1/auth/register \
-  -H "Content-Type: application/json" \
-  -d '{
-    "email": "user@example.com",
-    "password": "password123",
-    "name": "John Doe"
-  }'
-```
-
-### Login
-
-```bash
-curl -X POST http://localhost:8080/api/v1/auth/login \
-  -H "Content-Type: application/json" \
-  -d '{
-    "email": "user@example.com",
-    "password": "password123"
-  }'
-```
-
-Response:
+Every successful response is wrapped:
 
 ```json
-{
-    "access_token": "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9...",
-    "refresh_token": "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9...",
-    "token_type": "Bearer",
-    "expires_in": 900
-}
+{ "data": <payload> }
 ```
 
-### Create an album (with authentication)
+Errors are `4xx`/`5xx` with:
 
-```bash
-curl -X POST http://localhost:8080/api/v1/albums \
-  -H "Content-Type: application/json" \
-  -H "Authorization: Bearer YOUR_ACCESS_TOKEN" \
-  -d '{
-    "title": "Abbey Road",
-    "artist": "The Beatles",
-    "price": 24.99
-  }'
+```json
+{ "error": { "code": "VALIDATION_ERROR", "message": "..." } }
 ```
 
-### Get all albums with pagination
-
-```bash
-curl -X GET "http://localhost:8080/api/v1/albums?page=1&page_size=10&sort_by=created_at&order=desc" \
-  -H "Authorization: Bearer YOUR_ACCESS_TOKEN"
-```
-
-## Swagger Documentation
-
-Generate and view Swagger documentation:
-
-```bash
-# Generate Swagger docs
-make swagger
-
-# Run the API and visit
-http://localhost:8080/swagger/index.html
-```
-
-## Database Configuration
-
-### MySQL Setup
-
-1. Create a database:
-
-```sql
-CREATE DATABASE gin_rest_db CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci;
-```
-
-2. Update `.env`:
-
-```env
-DATABASE_TYPE=mysql
-MYSQL_HOST=localhost
-MYSQL_PORT=3306
-MYSQL_USER=root
-MYSQL_PASSWORD=yourpassword
-MYSQL_DATABASE=gin_rest_db
-```
-
-### Firebase Setup
-
-1. Create a Firebase project at https://console.firebase.google.com
-
-2. Enable Firestore Database
-
-3. Generate a service account key:
-    - Go to Project Settings > Service Accounts
-    - Click "Generate New Private Key"
-    - Save as `serviceAccountKey.json` in the project root
-
-4. Update `.env`:
-
-```env
-DATABASE_TYPE=firebase
-FIREBASE_PROJECT_ID=your-project-id
-FIREBASE_CREDENTIALS=./serviceAccountKey.json
-```
-
-## Adding New Resources
-
-To add a new resource (e.g., "Books"):
-
-1. **Add model** in `internal/models/models.go`:
-
-```go
-type Book struct {
-    ID        string    `json:"id" gorm:"primaryKey" firestore:"id"`
-    Title     string    `json:"title" binding:"required"`
-    Author    string    `json:"author" binding:"required"`
-    ISBN      string    `json:"isbn" binding:"required"`
-    UserID    string    `json:"user_id"`
-    CreatedAt time.Time `json:"created_at"`
-    UpdatedAt time.Time `json:"updated_at"`
-}
-```
-
-2. **Add repository methods** in `internal/repository/repository.go`:
-
-```go
-CreateBook(ctx context.Context, book *models.Book) error
-GetBookByID(ctx context.Context, id string) (*models.Book, error)
-// ... other CRUD methods
-```
-
-3. **Implement repository** in both MySQL and Firebase repositories
-
-4. **Add service methods** in `internal/service/service.go`
-
-5. **Add handlers** in `internal/handlers/handlers.go`
-
-6. **Register routes** in `cmd/api/main.go`:
-
-```go
-books := protected.Group("/books")
-{
-    books.GET("", h.GetBooks)
-    books.GET("/:id", h.GetBookByID)
-    books.POST("", h.CreateBook)
-    books.PUT("/:id", h.UpdateBook)
-    books.DELETE("/:id", h.DeleteBook)
-}
-```
-
-## Testing
-
-Run tests:
-
-```bash
-make test
-
-# With coverage
-make test-coverage
-```
-
-## Available Make Commands
-
-```bash
-make help              # Display all available commands
-make install           # Install dependencies
-make build             # Build the application
-make run               # Run the application
-make test              # Run tests
-make clean             # Clean build artifacts
-make docker-build      # Build Docker image
-make docker-up         # Start Docker containers
-make docker-down       # Stop Docker containers
-make docker-logs       # View Docker logs
-make swagger           # Generate Swagger documentation
-make lint              # Run linter
-make fmt               # Format code
-```
+The mobile client (`lib/core/network/api_helpers.dart`) unwraps `data` and
+maps `error` into its `ApiError` sealed class.
 
 ## Configuration
 
-All configuration is done via environment variables. See `.env.example` for all available options.
+Copy `.env.example` to `.env` and fill in:
 
-### Key Configuration Options
+| Variable          | Required | Purpose                                       |
+|-------------------|----------|-----------------------------------------------|
+| `DATABASE_URL`    | yes      | Postgres connection string                    |
+| `JWT_SECRET`      | yes      | HS256 signing secret for access tokens        |
+| `JWT_ACCESS_TTL`  | no       | Access token TTL (default `15m`)              |
+| `JWT_REFRESH_TTL` | no       | Refresh token TTL (default `720h`)            |
+| `PORT`            | no       | HTTP port (default `8080`)                    |
+| `APPLE_BUNDLE_ID` | no       | iOS bundle ID — required to enable `/auth/apple` |
 
-- `ENVIRONMENT` - Environment mode (development/production)
-- `PORT` - Server port
-- `DATABASE_TYPE` - Database type (mysql/firebase)
-- `JWT_SECRET` - Secret key for JWT tokens (change in production!)
-- `JWT_EXPIRATION` - Access token expiration time
-- `JWT_REFRESH_EXPIRATION` - Refresh token expiration time
-- `RATE_LIMIT_REQUESTS` - Number of requests per window
-- `RATE_LIMIT_DURATION` - Rate limit time window
-- `LOG_LEVEL` - Logging level (debug/info/warn/error)
+If `APPLE_BUNDLE_ID` is empty the Apple Sign-In endpoint returns
+`apple sign-in not configured`.
 
-## Security Best Practices
-
-1. **Change the JWT secret** in production
-2. **Use HTTPS** in production
-3. **Set strong passwords** for database
-4. **Enable rate limiting** to prevent abuse
-5. **Keep dependencies updated**
-6. **Don't commit** `.env` or Firebase credentials
-7. **Use environment-specific** configurations
-8. **Implement proper** CORS settings for your frontend domain
-
-## Deployment
-
-### Deploy with Docker
+## Local development
 
 ```bash
-# Build image
-docker build -t gin-rest-api .
+# install deps
+make install
 
-# Run container
-docker run -p 8080:8080 --env-file .env gin-rest-api
+# bring up Postgres yourself, then apply migrations
+make migrate
+
+# run the server (reads .env)
+make run
 ```
 
-### Deploy to Cloud Platforms
+Hits `:8080` by default. `GET /health` returns `{"status":"ok"}`.
 
-The template is ready to deploy to:
+## API map
 
-- AWS (ECS, EC2, Elastic Beanstalk)
-- Google Cloud Run
-- Azure Container Instances
-- Heroku
-- DigitalOcean App Platform
+All routes live under `/api/v1`. Auth routes are public; everything else
+requires `Authorization: Bearer <accessToken>`.
 
-## Contributing
+### Auth
 
-1. Fork the repository
-2. Create your feature branch (`git checkout -b feature/amazing-feature`)
-3. Commit your changes (`git commit -m 'Add some amazing feature'`)
-4. Push to the branch (`git push origin feature/amazing-feature`)
-5. Open a Pull Request
+| Method | Path                | Body                                          |
+|--------|---------------------|-----------------------------------------------|
+| POST   | `/auth/register`    | `{ email, displayName, password }`            |
+| POST   | `/auth/login`       | `{ email, password }`                         |
+| POST   | `/auth/apple`       | `{ identityToken, fullName? }`                |
+| POST   | `/auth/refresh`     | `{ refreshToken }`                            |
+| POST   | `/auth/logout`      | `{ refreshToken? }` — auth required           |
 
-## License
+`register`/`login`/`apple` return:
 
-This project is licensed under the MIT License - see the LICENSE file for details.
+```json
+{
+  "user":         { "id": "...", "email": "...", "displayName": "...", "createdAt": "..." },
+  "accessToken":  "...",
+  "refreshToken": "...",
+  "expiresIn":    900
+}
+```
 
-## Support
+### Users
 
-For questions or issues, please open an issue on GitHub.
+| Method | Path                       | Notes                                  |
+|--------|----------------------------|----------------------------------------|
+| GET    | `/users/me`                | self profile (includes email)          |
+| PATCH  | `/users/me`                | `{ displayName }`                      |
+| GET    | `/users/:id/profile`       | public profile (no email, with public boards) |
 
-## Acknowledgments
+### Lists
 
-- [Gin Web Framework](https://gin-gonic.com/)
-- [GORM](https://gorm.io/)
-- [Firebase Admin SDK](https://firebase.google.com/docs/admin/setup)
-- [golang-jwt](https://github.com/golang-jwt/jwt)
+| Method | Path                              | Role        |
+|--------|-----------------------------------|-------------|
+| GET    | `/lists`                          | self        |
+| GET    | `/lists/public?q=&category=`      | self        |
+| POST   | `/lists`                          | self        |
+| GET    | `/lists/:id`                      | self (public list) / member (private) |
+| PATCH  | `/lists/:id`                      | owner/admin |
+| DELETE | `/lists/:id`                      | owner       |
+| POST   | `/lists/:id/join`                 | self (public lists only) |
 
----
+### Members
 
-**Happy coding! 🚀**
+| Method | Path                                | Role        |
+|--------|-------------------------------------|-------------|
+| GET    | `/lists/:id/members`                | member      |
+| PATCH  | `/lists/:id/members/:userId`        | owner       |
+| DELETE | `/lists/:id/members/:userId`        | owner/admin |
+
+### Invites
+
+| Method | Path                                       | Role        |
+|--------|--------------------------------------------|-------------|
+| GET    | `/lists/:id/invite`                        | owner/admin |
+| POST   | `/lists/:id/invite/regenerate`             | owner/admin |
+| GET    | `/lists/invite/:token`                     | self (preview) |
+| POST   | `/lists/invite/:token/join`                | self        |
+
+### Entries
+
+| Method | Path                                            | Role        |
+|--------|-------------------------------------------------|-------------|
+| PUT    | `/lists/:id/entries/me`                         | member      |
+| DELETE | `/lists/:id/entries/me`                         | member      |
+| PATCH  | `/lists/:id/entries/ranks`                      | owner/admin (bulk manual_rank for text lists) |
+| GET    | `/lists/:id/entries/pending`                    | owner/admin |
+| POST   | `/lists/:id/entries/:entryId/approve`           | owner/admin |
+| POST   | `/lists/:id/entries/:entryId/reject`            | owner/admin |
+| DELETE | `/lists/:id/entries/:entryId`                   | owner/admin |
+
+`PUT /entries/me` body — exactly one of these three (matching the list's
+`valueType`) plus an optional `note`:
+
+```json
+{ "valueNumber":     1234.5,  "note": "..." }
+{ "valueDurationMs": 90000,   "note": "..." }
+{ "valueText":       "lorem", "note": "..." }
+```
+
+## Schema
+
+Two migrations:
+
+- `001_init.sql` — `users`, `lists`, `list_members`, `entries`, `refresh_tokens`
+- `002_lists_and_entries_extensions.sql` — adds `lists.category/locked` +
+  chat links, adds `entries.status` (`pending`/`approved`/`rejected`) and
+  `entries.previous_rank` for delta rendering. Existing rows default to
+  `approved` so adding the column is non-breaking.
+
+## sqlc
+
+After editing anything in `internal/db/queries/`:
+
+```bash
+make sqlc
+```
+
+`sqlc.yaml` is configured to write generated code into `internal/db/sqlc/`.
+Do not hand-edit those files.
+
+## Docker
+
+```bash
+docker build -t ranke-be .
+docker run -p 8080:8080 --env-file .env ranke-be
+```

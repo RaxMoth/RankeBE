@@ -25,8 +25,11 @@ clean: ## Clean build artifacts
 sqlc: ## Generate sqlc code from SQL queries
 	sqlc generate
 
-migrate: ## Apply migration to local PostgreSQL (requires psql)
-	psql "$$DATABASE_URL" -f internal/db/migrations/001_init.sql
+migrate: ## Apply all migrations to local PostgreSQL (requires psql)
+	@for f in internal/db/migrations/*.sql; do \
+	  echo "Applying $$f"; \
+	  psql "$$DATABASE_URL" -v ON_ERROR_STOP=1 -f "$$f" || exit 1; \
+	done
 
 fmt: ## Format code
 	go fmt ./...
