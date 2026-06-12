@@ -151,11 +151,16 @@ func (h *ListHandler) GetUserLists(c *gin.Context) {
 		return
 	}
 
+	// Single round-trip: own_rank is computed inline by the query. 0
+	// is the "no rank" sentinel (see queries/lists.sql) — convert to
+	// a nil pointer before the DTO mapper to keep the wire contract
+	// consistent (omitempty drops it from the JSON).
 	out := make([]dto.ListSummary, 0, len(rows))
 	for _, r := range rows {
-		ownRank, err := h.lists.GetUserRankFromRow(c.Request.Context(), r, userID)
-		if err != nil {
-			ownRank = nil
+		var ownRank *int
+		if r.OwnRank > 0 {
+			v := int(r.OwnRank)
+			ownRank = &v
 		}
 		out = append(out, dto.MapUserListsRow(r, ownRank))
 	}

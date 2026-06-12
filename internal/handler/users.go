@@ -65,6 +65,33 @@ func (h *UserHandler) UpdateMe(c *gin.Context) {
 	Success(c, http.StatusOK, dto.MapUser(user, true))
 }
 
+// DeleteMe permanently deletes the caller's account.
+//
+// App Store guideline 5.1.1(v) requires that any account-creating app
+// provide an in-app account-deletion path; this endpoint backs that
+// requirement.
+//
+// The cascade is wide: deleting the row drops every refresh token,
+// every entry, every membership, AND every board the user *owns* (FK
+// from `lists.owner_id` is ON DELETE CASCADE). That means other members
+// of an owned board lose access. A future iteration could transfer
+// ownership to the next-most-senior admin before deletion — for v1 we
+// document the behavior and accept it.
+func (h *UserHandler) DeleteMe(c *gin.Context) {
+	userID, ok := middleware.GetUserID(c)
+	if !ok {
+		Unauthorized(c, "authentication required")
+		return
+	}
+
+	if err := h.queries.DeleteUser(c.Request.Context(), userID); err != nil {
+		InternalError(c)
+		return
+	}
+
+	Success(c, http.StatusOK, gin.H{"message": "account deleted"})
+}
+
 // GetUserProfile returns a user's *public* profile — display name, avatar,
 // member-since timestamp, and the list of public boards they belong to.
 //

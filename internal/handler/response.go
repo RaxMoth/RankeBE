@@ -6,7 +6,8 @@ import (
 	"github.com/gin-gonic/gin"
 )
 
-// Error codes
+// Error codes — kept as a tight registry so the mobile client can switch
+// on a known set rather than parsing free-form messages.
 const (
 	CodeValidationError  = "VALIDATION_ERROR"
 	CodeInvalidValueType = "INVALID_VALUE_TYPE"
@@ -14,7 +15,10 @@ const (
 	CodeForbidden        = "FORBIDDEN"
 	CodeNotFound         = "NOT_FOUND"
 	CodeListNotFound     = "LIST_NOT_FOUND"
+	CodeListLocked       = "LIST_LOCKED"
 	CodeInternalError    = "INTERNAL_ERROR"
+	CodeEmailTaken       = "EMAIL_TAKEN"
+	CodeRateLimited      = "RATE_LIMITED"
 )
 
 type successEnvelope struct {

@@ -1,6 +1,8 @@
 package handler
 
 import (
+	"errors"
+	"log/slog"
 	"net/http"
 
 	"github.com/gin-gonic/gin"
@@ -22,8 +24,12 @@ func NewAuthHandler(auth *service.AuthService) *AuthHandler {
 
 type registerRequest struct {
 	Email       string `json:"email"       binding:"required,email"`
-	DisplayName string `json:"displayName" binding:"required,min=1"`
-	Password    string `json:"password"    binding:"required,min=6"`
+	DisplayName string `json:"displayName" binding:"required,min=1,max=60"`
+	// Min 8 keeps us off the "trivially crackable" list while staying
+	// short enough that users won't paste-and-pray. Max 128 caps the
+	// bcrypt input (bcrypt only hashes the first 72 bytes anyway, but
+	// allowing arbitrarily long strings invites memory abuse).
+	Password string `json:"password"    binding:"required,min=8,max=128"`
 }
 
 type loginRequest struct {
@@ -63,7 +69,19 @@ func (h *AuthHandler) Register(c *gin.Context) {
 
 	user, pair, err := h.auth.Register(c.Request.Context(), req.Email, req.DisplayName, req.Password)
 	if err != nil {
-		Fail(c, http.StatusConflict, CodeValidationError, err.Error())
+		// Map known business errors to specific codes. Everything else is
+		// surfaced as a generic 500 with the raw error logged but NOT
+		// echoed to the client — bcrypt/pgx messages leak internals.
+		switch {
+		case errors.Is(err, service.ErrEmailTaken):
+			Fail(c, http.StatusConflict, CodeEmailTaken, "email already registered")
+		default:
+			slog.Error("register failed",
+				slog.String("request_id", middleware.GetRequestID(c)),
+				slog.String("email", req.Email),
+				slog.String("error", err.Error()))
+			InternalError(c)
+		}
 		return
 	}
 
@@ -95,7 +113,13 @@ func (h *AuthHandler) AppleSignIn(c *gin.Context) {
 
 	user, pair, err := h.auth.AppleSignIn(c.Request.Context(), req.IdentityToken, req.FullName)
 	if err != nil {
-		Unauthorized(c, err.Error())
+		// Sanitize: "invalid apple token: ..." can leak verifier internals
+		// (cert chain errors, JWKS-fetch failures). Log the real cause;
+		// give the client a generic message.
+		slog.Warn("apple sign-in failed",
+			slog.String("request_id", middleware.GetRequestID(c)),
+			slog.String("error", err.Error()))
+		Unauthorized(c, "Apple sign-in failed")
 		return
 	}
 
@@ -136,14 +160,4 @@ func (h *AuthHandler) Logout(c *gin.Context) {
 		_ = h.auth.Logout(c.Request.Context(), req.RefreshToken)
 	}
 	Success(c, http.StatusOK, gin.H{"message": "logged out"})
-}
-
-// helper for getting user ID or aborting
-func requireUserID(c *gin.Context) (any, bool) {
-	uid, ok := middleware.GetUserID(c)
-	if !ok {
-		Unauthorized(c, "authentication required")
-		return nil, false
-	}
-	return uid, true
 }

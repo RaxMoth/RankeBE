@@ -26,21 +26,21 @@ type ListSummary struct {
 // RankedList is the full leaderboard payload returned by /lists/:id and
 // the create/update/invite endpoints.
 type RankedList struct {
-	ID              string         `json:"id"`
-	Title           string         `json:"title"`
-	Description     *string        `json:"description,omitempty"`
-	ValueType       string         `json:"valueType"`
-	RankOrder       string         `json:"rankOrder"`
-	IsPublic        bool           `json:"isPublic"`
-	Locked          bool           `json:"locked"`
-	Category        *string        `json:"category,omitempty"`
-	InviteToken     *string        `json:"inviteToken,omitempty"`
-	TelegramLink    *string        `json:"telegramLink,omitempty"`
-	WhatsappLink    *string        `json:"whatsappLink,omitempty"`
-	DiscordLink     *string        `json:"discordLink,omitempty"`
-	MemberCount     int            `json:"memberCount"`
-	CurrentUserRole *string        `json:"currentUserRole,omitempty"`
-	Entries         []RankedEntry  `json:"entries"`
+	ID              string        `json:"id"`
+	Title           string        `json:"title"`
+	Description     *string       `json:"description,omitempty"`
+	ValueType       string        `json:"valueType"`
+	RankOrder       string        `json:"rankOrder"`
+	IsPublic        bool          `json:"isPublic"`
+	Locked          bool          `json:"locked"`
+	Category        *string       `json:"category,omitempty"`
+	InviteToken     *string       `json:"inviteToken,omitempty"`
+	TelegramLink    *string       `json:"telegramLink,omitempty"`
+	WhatsappLink    *string       `json:"whatsappLink,omitempty"`
+	DiscordLink     *string       `json:"discordLink,omitempty"`
+	MemberCount     int           `json:"memberCount"`
+	CurrentUserRole *string       `json:"currentUserRole,omitempty"`
+	Entries         []RankedEntry `json:"entries"`
 }
 
 // RankedEntry is one row in a leaderboard.

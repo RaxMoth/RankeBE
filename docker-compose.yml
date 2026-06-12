@@ -1,0 +1,68 @@
+# One-command dev stack: Postgres + API.
+#
+#   docker compose up --build
+#
+# On first start Postgres auto-applies every *.sql file under
+# internal/db/migrations in lexical order (Postgres' built-in
+# docker-entrypoint-initdb.d behavior). Subsequent starts skip the
+# init scripts — to re-run migrations after editing them, wipe the
+# volume:
+#
+#   docker compose down -v
+#
+# Note: if you've been running a standalone `ranke-postgres` container
+# from the earlier `docker run` instructions, stop it first:
+#
+#   docker rm -f ranke-postgres
+#
+# This compose file owns port 5432.
+
+services:
+  postgres:
+    image: postgres:16-alpine
+    container_name: ranke-postgres
+    environment:
+      POSTGRES_USER: ranke
+      POSTGRES_PASSWORD: ranke
+      POSTGRES_DB: ranke
+    ports:
+      - "5432:5432"
+    volumes:
+      # First-boot migrations. Read-only so an accidental DDL can't
+      # write back into the repo from inside the container.
+      - ./internal/db/migrations:/docker-entrypoint-initdb.d:ro
+      - postgres_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ranke -d ranke"]
+      interval: 2s
+      timeout: 3s
+      retries: 15
+      start_period: 5s
+
+  api:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: ranke-api
+    environment:
+      # Override the .env file's localhost DATABASE_URL — inside the
+      # compose network Postgres is reachable as `postgres`, not the
+      # host loopback.
+      DATABASE_URL: postgres://ranke:ranke@postgres:5432/ranke?sslmode=disable
+      PORT: "8080"
+      ENV: development
+    # Inherit JWT_SECRET, APPLE_BUNDLE_ID, etc. from the dev .env so
+    # we don't bake secrets into the image.
+    env_file:
+      - .env
+    ports:
+      - "8080:8080"
+    depends_on:
+      postgres:
+        condition: service_healthy
+    # Restart on failure during dev so a typo in code doesn't leave
+    # you with a dead container.
+    restart: unless-stopped
+
+volumes:
+  postgres_data:

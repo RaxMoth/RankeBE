@@ -10,6 +10,7 @@ import (
 
 	"github.com/golang-jwt/jwt/v5"
 	"github.com/jackc/pgx/v5"
+	"github.com/jackc/pgx/v5/pgconn"
 	"github.com/jackc/pgx/v5/pgtype"
 	"github.com/jackc/pgx/v5/pgxpool"
 	"golang.org/x/crypto/bcrypt"
@@ -17,6 +18,15 @@ import (
 	"ranke-be/internal/apple"
 	"ranke-be/internal/config"
 	db "ranke-be/internal/db/sqlc"
+)
+
+// Typed errors the handlers map to specific HTTP status + error code.
+// Anything else that bubbles up is surfaced as 500 with a generic
+// "internal server error" so we don't leak DB/bcrypt internals.
+var (
+	// ErrEmailTaken is returned when CreateUser hits the `users.email`
+	// unique index. Handler returns 409 + CodeEmailTaken.
+	ErrEmailTaken = errors.New("email already registered")
 )
 
 type AuthService struct {
@@ -48,6 +58,12 @@ func (s *AuthService) Register(ctx context.Context, email, displayName, password
 		PasswordHash: pgtype.Text{String: string(hash), Valid: true},
 	})
 	if err != nil {
+		// Map Postgres unique-constraint violations to our typed error so
+		// the handler returns 409 + EMAIL_TAKEN instead of a generic 500.
+		var pgErr *pgconn.PgError
+		if errors.As(err, &pgErr) && pgErr.Code == "23505" {
+			return nil, nil, ErrEmailTaken
+		}
 		return nil, nil, fmt.Errorf("create user: %w", err)
 	}
 
@@ -140,6 +156,17 @@ func (s *AuthService) AppleSignIn(ctx context.Context, identityToken, fullName s
 	return &user, pair, nil
 }
 
+// RefreshToken rotates a refresh token. Three outcomes are possible:
+//
+//  1. Token is valid → revoke it, issue a fresh access+refresh pair.
+//  2. Token doesn't exist → return "invalid refresh token" (could be a
+//     fishing attempt, could be a typo).
+//  3. Token EXISTS but is already revoked → *theft suspected*. The
+//     legitimate user already exchanged this token; anyone else holding
+//     it cloned it from a leaked store/HTTP log. We defensively revoke
+//     every refresh token for that user, forcing them through a fresh
+//     login flow. This is the classic "refresh-token reuse detection"
+//     pattern.
 func (s *AuthService) RefreshToken(ctx context.Context, refreshToken string) (*TokenPair, error) {
 	tx, err := s.pool.Begin(ctx)
 	if err != nil {
@@ -151,10 +178,22 @@ func (s *AuthService) RefreshToken(ctx context.Context, refreshToken string) (*T
 
 	rt, err := qtx.GetValidRefreshToken(ctx, refreshToken)
 	if err != nil {
+		// Distinguish "never existed" from "was valid, now revoked".
+		// pgx returns ErrNoRows for both, so we have to do a second
+		// lookup that includes revoked rows.
+		if existing, lookupErr := qtx.GetRefreshTokenAny(ctx, refreshToken); lookupErr == nil && existing.Revoked {
+			// Reuse detected — nuke all refresh tokens for this user.
+			// We don't surface this as a different error: the caller
+			// (a leaked-token holder OR the legitimate user racing)
+			// gets the same "invalid refresh token" message, but the
+			// real account is forced through a fresh login.
+			_ = qtx.RevokeAllUserRefreshTokens(ctx, existing.UserID)
+			_ = tx.Commit(ctx)
+		}
 		return nil, errors.New("invalid refresh token")
 	}
 
-	// Revoke old token
+	// Revoke the presented token (single use)
 	if err := qtx.RevokeRefreshToken(ctx, rt.ID); err != nil {
 		return nil, fmt.Errorf("revoke old token: %w", err)
 	}

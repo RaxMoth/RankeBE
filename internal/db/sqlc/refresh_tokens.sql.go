@@ -37,6 +37,28 @@ func (q *Queries) CreateRefreshToken(ctx context.Context, arg CreateRefreshToken
 	return i, err
 }
 
+const getRefreshTokenAny = `-- name: GetRefreshTokenAny :one
+SELECT id, user_id, token, expires_at, revoked, created_at FROM refresh_tokens WHERE token = $1
+`
+
+// GetRefreshTokenAny finds a refresh token by value regardless of
+// revoked / expired state. Used by the reuse-detection path: if a
+// caller presents an already-revoked token, that's a strong signal of
+// token theft, and we revoke every refresh token for that user.
+func (q *Queries) GetRefreshTokenAny(ctx context.Context, token string) (RefreshToken, error) {
+	row := q.db.QueryRow(ctx, getRefreshTokenAny, token)
+	var i RefreshToken
+	err := row.Scan(
+		&i.ID,
+		&i.UserID,
+		&i.Token,
+		&i.ExpiresAt,
+		&i.Revoked,
+		&i.CreatedAt,
+	)
+	return i, err
+}
+
 const getValidRefreshToken = `-- name: GetValidRefreshToken :one
 SELECT id, user_id, token, expires_at, revoked, created_at FROM refresh_tokens
 WHERE token = $1 AND revoked = FALSE AND expires_at > NOW()

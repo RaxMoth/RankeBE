@@ -21,6 +21,13 @@ RETURNING *;
 UPDATE users SET display_name = $2 WHERE id = $1
 RETURNING *;
 
+-- DeleteUser cascades through every FK in 001_init.sql:
+--   refresh_tokens (user_id), entries (user_id), list_members (user_id),
+--   lists (owner_id). A user pressing "Delete account" therefore also
+--   wipes any board they own — known limitation, see README.
+-- name: DeleteUser :exec
+DELETE FROM users WHERE id = $1;
+
 -- name: GetUserProfile :one
 SELECT
   u.id,

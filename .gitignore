@@ -4,6 +4,10 @@
 .env.*.local
 .env.production
 
+# Per-developer Claude settings. The shared /loop command under
+# .claude/commands/ IS committed; only the local override file is not.
+.claude/settings.local.json
+
 # Build artifacts
 bin/
 dist/

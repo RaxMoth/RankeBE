@@ -21,6 +21,11 @@ type Querier interface {
 	DeleteEntryByListAndUser(ctx context.Context, arg DeleteEntryByListAndUserParams) error
 	DeleteList(ctx context.Context, id pgtype.UUID) error
 	DeleteListMember(ctx context.Context, arg DeleteListMemberParams) error
+	// DeleteUser cascades through every FK in 001_init.sql:
+	//   refresh_tokens (user_id), entries (user_id), list_members (user_id),
+	//   lists (owner_id). A user pressing "Delete account" therefore also
+	//   wipes any board they own — known limitation, see README.
+	DeleteUser(ctx context.Context, id pgtype.UUID) error
 	GetCurrentRankByDuration(ctx context.Context, arg GetCurrentRankByDurationParams) (int32, error)
 	GetCurrentRankByDurationDesc(ctx context.Context, arg GetCurrentRankByDurationDescParams) (int32, error)
 	// ── current rank lookups (used to populate previous_rank on upsert) ──
@@ -41,9 +46,28 @@ type Querier interface {
 	GetRankedEntriesByNumber(ctx context.Context, listID pgtype.UUID) ([]GetRankedEntriesByNumberRow, error)
 	GetRankedEntriesByNumberDesc(ctx context.Context, listID pgtype.UUID) ([]GetRankedEntriesByNumberDescRow, error)
 	GetRankedEntriesByText(ctx context.Context, listID pgtype.UUID) ([]GetRankedEntriesByTextRow, error)
+	// GetRefreshTokenAny finds a refresh token by value regardless of
+	// revoked / expired state. Used by the reuse-detection path: if a
+	// caller presents an already-revoked token, that's a strong signal of
+	// token theft, and we revoke every refresh token for that user.
+	GetRefreshTokenAny(ctx context.Context, token string) (RefreshToken, error)
 	GetUserByAppleSub(ctx context.Context, appleSub pgtype.Text) (User, error)
 	GetUserByEmail(ctx context.Context, email string) (User, error)
 	GetUserByID(ctx context.Context, id pgtype.UUID) (User, error)
+	// GetUserLists returns one row per list the caller belongs to, including
+	// their current rank if they have an entry. The rank is computed
+	// in-line as `count_of_better + 1` to avoid an N+1 round-trip (one rank
+	// query per board) from the handler — a single SELECT now drives the
+	// entire home feed.
+	//
+	// The CASE chain dispatches on the list's value_type / rank_order:
+	//   - number   asc : lower value wins
+	//   - number   desc: higher value wins
+	//   - duration asc : faster wins
+	//   - duration desc: slower wins
+	//   - text         : manual_rank wins (lower is better)
+	// We treat the user as unranked (NULL own_rank) when their entry doesn't
+	// exist OR is not approved.
 	GetUserLists(ctx context.Context, userID pgtype.UUID) ([]GetUserListsRow, error)
 	GetUserProfile(ctx context.Context, id pgtype.UUID) (GetUserProfileRow, error)
 	GetValidRefreshToken(ctx context.Context, token string) (RefreshToken, error)

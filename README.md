@@ -8,28 +8,32 @@ for the Flutter client. See `internal/handler/dto/` and the API map below.
 
 ## Stack
 
-- Go 1.24, Gin
+- Go 1.25, Gin
 - PostgreSQL via `pgx/v5` + `pgxpool`
 - Generated DB layer with [sqlc](https://sqlc.dev/) (`internal/db/sqlc`)
 - JWT (HS256) access tokens + opaque refresh tokens stored in DB
-- Sign in with Apple — verifies Apple JWKS server-side
+- Sign in with Apple — verifies Apple JWKS server-side, accepts server-to-server revocation notifications
+- Structured JSON logs via `log/slog`, per-request `X-Request-Id` correlation
+- Per-IP rate limit on `/auth/*` (`golang.org/x/time/rate`)
 
 ## Layout
 
 ```
-cmd/server/             entry point + router wiring
+cmd/server/             bootstrap (config, pool, http.Server) — delegates router to internal/server
 internal/
-  apple/                Apple identity-token verifier (JWKS cache)
-  config/               env loader (DATABASE_URL, JWT_SECRET, ...)
+  apple/                Apple identity-token + notification verifier (JWKS cache)
+  config/               env loader; production checks (strong secret, explicit CORS, bundle ID)
   db/
     migrations/         001_init.sql, 002_lists_and_entries_extensions.sql
     queries/            sqlc input — *.sql files
     sqlc/               generated query code (do NOT edit by hand)
   handler/              HTTP handlers (one file per resource)
     dto/                wire DTOs + sqlc-row mappers (camelCase)
-  middleware/           AuthRequired, RequireListRole, RequireListMember
+  middleware/           Auth, RequestID, Logger, Recovery, BodyLimit, IPRateLimiter, role gates
+  server/               router assembly + integration tests
   service/              business logic (transactions, validation)
 sqlc.yaml               sqlc config
+docker-compose.yml      one-command dev stack
 ```
 
 The handler layer never serializes a sqlc row directly — every response
@@ -70,18 +74,44 @@ If `APPLE_BUNDLE_ID` is empty the Apple Sign-In endpoint returns
 
 ## Local development
 
+One-command:
+
 ```bash
-# install deps
-make install
-
-# bring up Postgres yourself, then apply migrations
-make migrate
-
-# run the server (reads .env)
-make run
+cp .env.example .env
+# (edit .env — generate a real JWT_SECRET with `openssl rand -hex 32`)
+make dev-up           # Postgres + API in docker compose
 ```
 
-Hits `:8080` by default. `GET /health` returns `{"status":"ok"}`.
+The first boot of the Postgres container auto-runs every migration via
+`docker-entrypoint-initdb.d`. After editing a migration, `make dev-reset`
+wipes the volume so the next `dev-up` re-applies.
+
+Or step-by-step (your own Postgres, hot reload of the Go code):
+
+```bash
+make install
+make migrate          # applies all migrations to $DATABASE_URL
+make run              # foreground; reads .env
+```
+
+Health endpoints:
+
+| Path        | Purpose                                    |
+|-------------|--------------------------------------------|
+| `GET /healthz` | Liveness — process is up (no deps)     |
+| `GET /readyz`  | Readiness — pings Postgres, 503 on fail |
+| `GET /health`  | Alias for `/healthz` (legacy)          |
+
+Tests:
+
+```bash
+make test                 # unit tests, no DB required
+make test-integration     # runs the full router against the dev Postgres
+```
+
+The integration test in `internal/server/server_test.go` truncates every
+table before running, so don't point `TEST_DATABASE_URL` at a database
+with data you care about.
 
 ## API map
 
@@ -115,7 +145,24 @@ requires `Authorization: Bearer <accessToken>`.
 |--------|----------------------------|----------------------------------------|
 | GET    | `/users/me`                | self profile (includes email)          |
 | PATCH  | `/users/me`                | `{ displayName }`                      |
+| DELETE | `/users/me`                | permanently delete account (App Store 5.1.1(v)) |
 | GET    | `/users/:id/profile`       | public profile (no email, with public boards) |
+
+**Account deletion cascade** — deleting a user wipes their refresh
+tokens, entries, memberships, *and any list they own* (FK
+`lists.owner_id` is `ON DELETE CASCADE`). Other members of an owned
+list lose access. Future work: transfer ownership to the
+next-most-senior admin before deletion.
+
+### Apple notifications
+
+| Method | Path                                | Notes                          |
+|--------|-------------------------------------|--------------------------------|
+| POST   | `/auth/apple/notifications`         | Apple server-to-server webhook |
+
+Public endpoint; the signed JWT in the body is verified against Apple's
+JWKS. On `consent-revoked` / `account-delete` we delete the local user.
+Register the URL in Apple Developer → Services ID for it to fire.
 
 ### Lists
 

@@ -67,6 +67,20 @@ func (q *Queries) CreateUser(ctx context.Context, arg CreateUserParams) (User, e
 	return i, err
 }
 
+const deleteUser = `-- name: DeleteUser :exec
+DELETE FROM users WHERE id = $1
+`
+
+// DeleteUser cascades through every FK in 001_init.sql:
+//
+//	refresh_tokens (user_id), entries (user_id), list_members (user_id),
+//	lists (owner_id). A user pressing "Delete account" therefore also
+//	wipes any board they own — known limitation, see README.
+func (q *Queries) DeleteUser(ctx context.Context, id pgtype.UUID) error {
+	_, err := q.db.Exec(ctx, deleteUser, id)
+	return err
+}
+
 const getPublicBoardsForUser = `-- name: GetPublicBoardsForUser :many
 SELECT
   l.id, l.owner_id, l.title, l.description, l.value_type, l.rank_order, l.is_public, l.invite_token, l.created_at, l.updated_at, l.category, l.locked, l.telegram_link, l.whatsapp_link, l.discord_link,

@@ -190,7 +190,30 @@ SELECT
   e.value_duration_ms AS own_entry_value_duration_ms,
   e.value_text AS own_entry_value_text,
   e.manual_rank AS own_entry_manual_rank,
-  (SELECT COUNT(*) FROM list_members WHERE list_id = l.id) AS member_count
+  (SELECT COUNT(*) FROM list_members WHERE list_id = l.id) AS member_count,
+  -- own_rank uses 0 as a sentinel for "no rank" (no entry, or pending/
+  -- rejected entry). sqlc generates a non-nullable int from the
+  -- expression below; the handler converts 0 -> null before serializing.
+  --
+  -- Using a sentinel rather than a NULL because sqlc 1.30 can't be made
+  -- to emit pgtype.Int4 for a derived column (overrides don't bind to
+  -- aliases), and we'd rather not hand-edit generated code.
+  (CASE
+    WHEN e.id IS NULL OR e.status <> 'approved' THEN 0
+    ELSE 1 + (
+      SELECT COUNT(*) FROM entries e2
+      WHERE e2.list_id = l.id
+        AND e2.status = 'approved'
+        AND e2.user_id <> $1
+        AND (
+          (l.value_type = 'number'   AND l.rank_order = 'asc'  AND e2.value_number      < e.value_number)      OR
+          (l.value_type = 'number'   AND l.rank_order = 'desc' AND e2.value_number      > e.value_number)      OR
+          (l.value_type = 'duration' AND l.rank_order = 'asc'  AND e2.value_duration_ms < e.value_duration_ms) OR
+          (l.value_type = 'duration' AND l.rank_order = 'desc' AND e2.value_duration_ms > e.value_duration_ms) OR
+          (l.value_type = 'text'                               AND e2.manual_rank      < e.manual_rank)
+        )
+    )
+  END)::INT AS own_rank
 FROM lists l
 JOIN list_members lm ON lm.list_id = l.id AND lm.user_id = $1
 LEFT JOIN entries e ON e.list_id = l.id AND e.user_id = $1
@@ -220,8 +243,24 @@ type GetUserListsRow struct {
 	OwnEntryValueText       pgtype.Text        `json:"own_entry_value_text"`
 	OwnEntryManualRank      pgtype.Int4        `json:"own_entry_manual_rank"`
 	MemberCount             int64              `json:"member_count"`
+	OwnRank                 int32              `json:"own_rank"`
 }
 
+// GetUserLists returns one row per list the caller belongs to, including
+// their current rank if they have an entry. The rank is computed
+// in-line as `count_of_better + 1` to avoid an N+1 round-trip (one rank
+// query per board) from the handler — a single SELECT now drives the
+// entire home feed.
+//
+// The CASE chain dispatches on the list's value_type / rank_order:
+//   - number   asc : lower value wins
+//   - number   desc: higher value wins
+//   - duration asc : faster wins
+//   - duration desc: slower wins
+//   - text         : manual_rank wins (lower is better)
+//
+// We treat the user as unranked (NULL own_rank) when their entry doesn't
+// exist OR is not approved.
 func (q *Queries) GetUserLists(ctx context.Context, userID pgtype.UUID) ([]GetUserListsRow, error) {
 	rows, err := q.db.Query(ctx, getUserLists, userID)
 	if err != nil {
@@ -254,6 +293,7 @@ func (q *Queries) GetUserLists(ctx context.Context, userID pgtype.UUID) ([]GetUs
 			&i.OwnEntryValueText,
 			&i.OwnEntryManualRank,
 			&i.MemberCount,
+			&i.OwnRank,
 		); err != nil {
 			return nil, err
 		}

@@ -1,25 +1,30 @@
-# Build stage
-FROM golang:1.22-alpine AS builder
+# Build stage — Go version must match go.mod (1.25).
+FROM golang:1.25-alpine AS builder
 
 WORKDIR /app
 
+# Cache module downloads in a separate layer so source edits don't re-download.
 COPY go.mod go.sum ./
 RUN go mod download
 
 COPY . .
 
-RUN CGO_ENABLED=0 GOOS=linux go build -o server ./cmd/server
+# Static binary so the distroless/scratch final image works.
+RUN CGO_ENABLED=0 GOOS=linux go build \
+      -trimpath \
+      -ldflags="-s -w" \
+      -o /out/server ./cmd/server
 
-# Final stage
-FROM alpine:latest
+# Final stage — minimal image, non-root user, no shell.
+FROM alpine:3.20
 
-RUN apk --no-cache add ca-certificates
+RUN apk --no-cache add ca-certificates tzdata \
+  && addgroup -S app && adduser -S -G app app
 
-WORKDIR /root/
-
-COPY --from=builder /app/server .
+WORKDIR /app
+COPY --from=builder /out/server .
 COPY --from=builder /app/internal/db/migrations ./migrations/
 
+USER app
 EXPOSE 8080
-
-CMD ["./server"]
+ENTRYPOINT ["/app/server"]

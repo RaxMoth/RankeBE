@@ -307,48 +307,9 @@ func (s *ListService) GetRankedEntries(ctx context.Context, list *db.List) (any,
 	}
 }
 
-// GetUserCurrentRank returns the user's current rank on the given list, or
-// nil if they have no entry yet. Used by the upsert flow to populate
-// `previous_rank` on each submission and by the lists feed to populate
-// each summary's `ownRank`.
-func (s *ListService) GetUserCurrentRank(ctx context.Context, listID, userID pgtype.UUID, valueType, rankOrder string) (*int, error) {
-	var rank int32
-	var err error
-
-	switch valueType {
-	case "number":
-		if rankOrder == "desc" {
-			rank, err = s.queries.GetCurrentRankByNumberDesc(ctx, db.GetCurrentRankByNumberDescParams{ListID: listID, UserID: userID})
-		} else {
-			rank, err = s.queries.GetCurrentRankByNumber(ctx, db.GetCurrentRankByNumberParams{ListID: listID, UserID: userID})
-		}
-	case "duration":
-		if rankOrder == "desc" {
-			rank, err = s.queries.GetCurrentRankByDurationDesc(ctx, db.GetCurrentRankByDurationDescParams{ListID: listID, UserID: userID})
-		} else {
-			rank, err = s.queries.GetCurrentRankByDuration(ctx, db.GetCurrentRankByDurationParams{ListID: listID, UserID: userID})
-		}
-	case "text":
-		rank, err = s.queries.GetCurrentRankByText(ctx, db.GetCurrentRankByTextParams{ListID: listID, UserID: userID})
-	default:
-		return nil, fmt.Errorf("unknown value type: %s", valueType)
-	}
-
-	if err != nil {
-		// pgx returns ErrNoRows when the user has no entry — treat as nil.
-		return nil, nil
-	}
-	v := int(rank)
-	return &v, nil
-}
-
-// GetUserRankFromRow is a convenience wrapper over GetUserCurrentRank that
-// only fires the lookup when the user actually has an entry on the list
-// (per the GetUserListsRow.OwnEntryID column). Saves a query per board on
-// the home feed.
-func (s *ListService) GetUserRankFromRow(ctx context.Context, r db.GetUserListsRow, userID pgtype.UUID) (*int, error) {
-	if !r.OwnEntryID.Valid {
-		return nil, nil
-	}
-	return s.GetUserCurrentRank(ctx, r.ID, userID, r.ValueType, r.RankOrder)
-}
+// NOTE: a previous version of this service had GetUserCurrentRank +
+// GetUserRankFromRow helpers used to look up one user's rank for the
+// home-feed `ownRank`. They were removed once GetUserLists started
+// computing own_rank inline as part of the same query (saves N+1
+// round-trips). The five GetCurrentRankBy* queries still exist and are
+// used by EntryService.UpsertEntry to capture previous_rank.
