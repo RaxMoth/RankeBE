@@ -15,16 +15,16 @@ Flutter client's contract at `../RankeMobile/lib/core/network/api_paths.dart`.
 - [x] Entries upsert across value types (number / duration / text) — pre-loop
 - [x] Ranked entry feeds (5 variants) + manual-rank for text lists — pre-loop
 - [x] Moderation queue (pending / approve / reject) — pre-loop
-- [x] **Production hardening pass** — slog JSON logger, X-Request-Id middleware, panic recovery, body-size cap, HTTP timeouts, /healthz + /readyz, per-IP rate limit on `/auth/*`, pgxpool tuning, config validation (prod-mode wildcard CORS rejection, JWT secret length floor, mandatory APPLE_BUNDLE_ID) — `bf17d77`
-- [x] **Account deletion** — `DELETE /users/me` with FK cascade (App Store 5.1.1(v)) — `bf17d77`
-- [x] **Apple server-to-server revocation webhook** — `POST /auth/apple/notifications` (consent-revoked / account-delete) — `bf17d77`
-- [x] **`GetUserLists` N+1 collapse** — `own_rank` computed inline; home feed now one query — `bf17d77`
-- [x] **`ErrEmailTaken` sentinel** — Postgres unique-violation (23505) mapped to typed error → 409 EMAIL_TAKEN — `bf17d77`
-- [x] **Refresh-token reuse detection** — presenting a revoked token nukes every refresh token for the affected user — `bf17d77`
-- [x] **Apple Sign-In error sanitization** — verifier internals no longer leak to client; raw error logged with request_id — `bf17d77`
-- [x] **Password validation tightened** — min 8 / max 128, displayName max 60 — `bf17d77`
-- [x] **docker-compose dev stack** — `make dev-up` brings up Postgres + API, auto-applies migrations on first boot — `bf17d77`
-- [x] **First integration test** — `internal/server/server_test.go`: register → /me → unauth check → create list → /lists → submit entry → ownRank=1 → delete account → cascade verification — `bf17d77`
+- [x] **Production hardening pass** — slog JSON logger, X-Request-Id middleware, panic recovery, body-size cap, HTTP timeouts, /healthz + /readyz, per-IP rate limit on `/auth/*`, pgxpool tuning, config validation (prod-mode wildcard CORS rejection, JWT secret length floor, mandatory APPLE_BUNDLE_ID) — `a3b3081`
+- [x] **Account deletion** — `DELETE /users/me` with FK cascade (App Store 5.1.1(v)) — `a3b3081`
+- [x] **Apple server-to-server revocation webhook** — `POST /auth/apple/notifications` (consent-revoked / account-delete) — `a3b3081`
+- [x] **`GetUserLists` N+1 collapse** — `own_rank` computed inline; home feed now one query — `a3b3081`
+- [x] **`ErrEmailTaken` sentinel** — Postgres unique-violation (23505) mapped to typed error → 409 EMAIL_TAKEN — `a3b3081`
+- [x] **Refresh-token reuse detection** — presenting a revoked token nukes every refresh token for the affected user — `a3b3081`
+- [x] **Apple Sign-In error sanitization** — verifier internals no longer leak to client; raw error logged with request_id — `a3b3081`
+- [x] **Password validation tightened** — min 8 / max 128, displayName max 60 — `a3b3081`
+- [x] **docker-compose dev stack** — `make dev-up` brings up Postgres + API, auto-applies migrations on first boot — `a3b3081`
+- [x] **First integration test** — `internal/server/server_test.go`: register → /me → unauth check → create list → /lists → submit entry → ownRank=1 → delete account → cascade verification — `a3b3081`
 
 ## In Progress
 
@@ -56,6 +56,6 @@ Flutter client's contract at `../RankeMobile/lib/core/network/api_paths.dart`.
 
 ## Notes for the next loop iteration
 
-- The hardening pass is committed at `bf17d77` — future iterations start from a clean tree.
+- The hardening pass is committed at `a3b3081` — future iterations start from a clean tree.
 - Next priority: top of Backlog (Migration tooling OR sentinel errors in entries.go — both small slices, pick by current pain).
 - `.claude/settings.local.json` is per-developer and should stay gitignored; `.claude/commands/loop.md` is the shared `/loop` definition and is committed.
