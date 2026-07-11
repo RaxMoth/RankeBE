@@ -9,6 +9,7 @@ import (
 	"fmt"
 	"math/big"
 	"net/http"
+	"slices"
 	"sync"
 	"time"
 
@@ -99,7 +100,7 @@ func (v *Verifier) Verify(ctx context.Context, identityToken string) (*AppleClai
 
 	// Validate audience
 	aud, _ := claims.GetAudience()
-	if !containsString(aud, v.bundleID) {
+	if !slices.Contains(aud, v.bundleID) {
 		return nil, errors.New("invalid audience")
 	}
 
@@ -150,7 +151,7 @@ func (v *Verifier) VerifyNotification(ctx context.Context, payload string) (*Not
 		return nil, errors.New("invalid issuer")
 	}
 	aud, _ := claims.GetAudience()
-	if !containsString(aud, v.bundleID) {
+	if !slices.Contains(aud, v.bundleID) {
 		return nil, errors.New("invalid audience")
 	}
 
@@ -258,13 +259,4 @@ func (v *Verifier) fetchKeys(ctx context.Context) error {
 	v.mu.Unlock()
 
 	return nil
-}
-
-func containsString(ss []string, s string) bool {
-	for _, v := range ss {
-		if v == s {
-			return true
-		}
-	}
-	return false
 }

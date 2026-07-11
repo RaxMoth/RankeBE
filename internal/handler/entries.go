@@ -1,6 +1,7 @@
 package handler
 
 import (
+	"errors"
 	"net/http"
 
 	"github.com/gin-gonic/gin"
@@ -61,13 +62,13 @@ func (h *EntryHandler) UpsertMyEntry(c *gin.Context) {
 		Note:            req.Note,
 	})
 	if err != nil {
-		switch err.Error() {
-		case "INVALID_VALUE_TYPE":
+		switch {
+		case errors.Is(err, service.ErrInvalidValueType):
 			Fail(c, http.StatusBadRequest, CodeInvalidValueType, "value does not match list type: "+list.ValueType)
-		case "LIST_LOCKED":
+		case errors.Is(err, service.ErrListLocked):
 			Fail(c, http.StatusForbidden, CodeForbidden, "this list is locked")
 		default:
-			InternalError(c)
+			InternalErrorLog(c, "upsertEntry", err)
 		}
 		return
 	}
@@ -89,7 +90,7 @@ func (h *EntryHandler) DeleteMyEntry(c *gin.Context) {
 	}
 
 	if err := h.entries.DeleteOwnEntry(c.Request.Context(), listID, userID); err != nil {
-		InternalError(c)
+		InternalErrorLog(c, "deleteMyEntry", err)
 		return
 	}
 
@@ -105,7 +106,7 @@ func (h *EntryHandler) DeleteEntry(c *gin.Context) {
 	}
 
 	if err := h.entries.DeleteEntry(c.Request.Context(), entryID); err != nil {
-		InternalError(c)
+		InternalErrorLog(c, "deleteEntry", err)
 		return
 	}
 
@@ -123,7 +124,7 @@ func (h *EntryHandler) GetPendingEntries(c *gin.Context) {
 
 	rows, err := h.entries.GetPendingEntries(c.Request.Context(), listID)
 	if err != nil {
-		InternalError(c)
+		InternalErrorLog(c, "getPendingEntries", err)
 		return
 	}
 
@@ -147,7 +148,7 @@ func (h *EntryHandler) ApproveEntry(c *gin.Context) {
 	}
 
 	if err := h.entries.ApproveEntry(c.Request.Context(), listID, entryID); err != nil {
-		InternalError(c)
+		InternalErrorLog(c, "approveEntry", err)
 		return
 	}
 	Success(c, http.StatusOK, gin.H{"message": "approved"})
@@ -166,7 +167,7 @@ func (h *EntryHandler) RejectEntry(c *gin.Context) {
 	}
 
 	if err := h.entries.RejectEntry(c.Request.Context(), listID, entryID); err != nil {
-		InternalError(c)
+		InternalErrorLog(c, "rejectEntry", err)
 		return
 	}
 	Success(c, http.StatusOK, gin.H{"message": "rejected"})

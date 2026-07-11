@@ -1,9 +1,12 @@
 package handler
 
 import (
+	"log/slog"
 	"net/http"
 
 	"github.com/gin-gonic/gin"
+
+	"ranke-be/internal/middleware"
 )
 
 // Error codes — kept as a tight registry so the mobile client can switch
@@ -60,4 +63,17 @@ func NotFound(c *gin.Context, message string) {
 
 func InternalError(c *gin.Context) {
 	Fail(c, http.StatusInternalServerError, CodeInternalError, "internal server error")
+}
+
+// InternalErrorLog records the underlying cause — correlated by request ID —
+// before returning the opaque 500 body, so a production 500 leaves a
+// debuggable trail instead of vanishing. `op` names the handler operation
+// (e.g. "createList"). Prefer this over bare InternalError on any unexpected
+// server-side failure.
+func InternalErrorLog(c *gin.Context, op string, err error) {
+	slog.Error("internal error",
+		slog.String("request_id", middleware.GetRequestID(c)),
+		slog.String("op", op),
+		slog.Any("error", err))
+	InternalError(c)
 }

@@ -37,7 +37,7 @@ func (h *UserHandler) GetMe(c *gin.Context) {
 }
 
 type updateMeRequest struct {
-	DisplayName string `json:"displayName" binding:"required,min=1"`
+	DisplayName string `json:"displayName" binding:"required,min=1,max=60"`
 }
 
 func (h *UserHandler) UpdateMe(c *gin.Context) {
@@ -58,7 +58,7 @@ func (h *UserHandler) UpdateMe(c *gin.Context) {
 		DisplayName: req.DisplayName,
 	})
 	if err != nil {
-		InternalError(c)
+		InternalErrorLog(c, "updateDisplayName", err)
 		return
 	}
 
@@ -85,7 +85,7 @@ func (h *UserHandler) DeleteMe(c *gin.Context) {
 	}
 
 	if err := h.queries.DeleteUser(c.Request.Context(), userID); err != nil {
-		InternalError(c)
+		InternalErrorLog(c, "deleteUser", err)
 		return
 	}
 
@@ -112,7 +112,7 @@ func (h *UserHandler) GetUserProfile(c *gin.Context) {
 
 	boardRows, err := h.queries.GetPublicBoardsForUser(c.Request.Context(), userID)
 	if err != nil {
-		InternalError(c)
+		InternalErrorLog(c, "getPublicBoardsForUser", err)
 		return
 	}
 

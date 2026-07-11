@@ -23,8 +23,8 @@ func NewListHandler(lists *service.ListService) *ListHandler {
 // ── request DTOs (camelCase) ─────────────────────────────────────────
 
 type createListRequest struct {
-	Title        string  `json:"title"        binding:"required"`
-	Description  *string `json:"description"`
+	Title        string  `json:"title"        binding:"required,max=255"`
+	Description  *string `json:"description"  binding:"omitempty,max=2000"`
 	ValueType    string  `json:"valueType"    binding:"required,oneof=number duration text"`
 	RankOrder    string  `json:"rankOrder"    binding:"required,oneof=asc desc"`
 	IsPublic     *bool   `json:"isPublic"`
@@ -35,8 +35,8 @@ type createListRequest struct {
 }
 
 type updateListRequest struct {
-	Title        *string `json:"title"`
-	Description  *string `json:"description"`
+	Title        *string `json:"title"        binding:"omitempty,max=255"`
+	Description  *string `json:"description"  binding:"omitempty,max=2000"`
 	IsPublic     *bool   `json:"isPublic"`
 	Locked       *bool   `json:"locked"`
 	Category     *string `json:"category"`
@@ -126,13 +126,13 @@ func (h *ListHandler) Create(c *gin.Context) {
 		DiscordLink:  toPgText(req.DiscordLink),
 	})
 	if err != nil {
-		InternalError(c)
+		InternalErrorLog(c, "createList", err)
 		return
 	}
 
 	resp, err := h.fetchListWithEntries(c, list, userID)
 	if err != nil {
-		InternalError(c)
+		InternalErrorLog(c, "createList.fetch", err)
 		return
 	}
 	Success(c, http.StatusCreated, resp)
@@ -147,7 +147,7 @@ func (h *ListHandler) GetUserLists(c *gin.Context) {
 
 	rows, err := h.lists.GetUserLists(c.Request.Context(), userID)
 	if err != nil {
-		InternalError(c)
+		InternalErrorLog(c, "getUserLists", err)
 		return
 	}
 
@@ -174,7 +174,7 @@ func (h *ListHandler) SearchPublic(c *gin.Context) {
 
 	rows, err := h.lists.SearchPublicLists(c.Request.Context(), q, cat)
 	if err != nil {
-		InternalError(c)
+		InternalErrorLog(c, "searchPublic", err)
 		return
 	}
 
@@ -214,7 +214,7 @@ func (h *ListHandler) GetByID(c *gin.Context) {
 
 	resp, err := h.fetchListWithEntries(c, list, userID)
 	if err != nil {
-		InternalError(c)
+		InternalErrorLog(c, "getListByID.fetch", err)
 		return
 	}
 	Success(c, http.StatusOK, resp)
@@ -251,13 +251,13 @@ func (h *ListHandler) Update(c *gin.Context) {
 		DiscordLink:  toPgText(req.DiscordLink),
 	})
 	if err != nil {
-		InternalError(c)
+		InternalErrorLog(c, "updateList", err)
 		return
 	}
 
 	resp, err := h.fetchListWithEntries(c, list, userID)
 	if err != nil {
-		InternalError(c)
+		InternalErrorLog(c, "updateList.fetch", err)
 		return
 	}
 	Success(c, http.StatusOK, resp)
@@ -271,7 +271,7 @@ func (h *ListHandler) Delete(c *gin.Context) {
 	}
 
 	if err := h.lists.DeleteList(c.Request.Context(), listID); err != nil {
-		InternalError(c)
+		InternalErrorLog(c, "deleteList", err)
 		return
 	}
 
@@ -336,7 +336,7 @@ func (h *ListHandler) JoinByInvite(c *gin.Context) {
 
 	resp, err := h.fetchListWithEntries(c, list, userID)
 	if err != nil {
-		InternalError(c)
+		InternalErrorLog(c, "joinByInvite.fetch", err)
 		return
 	}
 	Success(c, http.StatusOK, resp)
@@ -375,7 +375,7 @@ func (h *ListHandler) RegenerateInvite(c *gin.Context) {
 
 	newToken, err := h.lists.RegenerateInviteToken(c.Request.Context(), listID)
 	if err != nil {
-		InternalError(c)
+		InternalErrorLog(c, "regenerateInvite", err)
 		return
 	}
 
@@ -395,7 +395,7 @@ func (h *ListHandler) GetMembers(c *gin.Context) {
 
 	rows, err := h.lists.GetMembers(c.Request.Context(), listID)
 	if err != nil {
-		InternalError(c)
+		InternalErrorLog(c, "getMembers", err)
 		return
 	}
 
@@ -475,7 +475,7 @@ func (h *ListHandler) BulkUpdateRanks(c *gin.Context) {
 	}
 
 	if err := h.lists.BulkUpdateRanks(c.Request.Context(), updates); err != nil {
-		InternalError(c)
+		InternalErrorLog(c, "bulkUpdateRanks", err)
 		return
 	}
 

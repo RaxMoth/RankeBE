@@ -11,6 +11,17 @@ import (
 	db "ranke-be/internal/db/sqlc"
 )
 
+// Sentinel errors returned by UpsertEntry. Handlers match these with
+// errors.Is rather than comparing err.Error() strings, so the mapping to
+// an HTTP status/code can't silently drift when a message is reworded.
+var (
+	// ErrInvalidValueType — submitted value fields don't match the list's
+	// value_type (e.g. a text value on a number list).
+	ErrInvalidValueType = errors.New("value does not match list type")
+	// ErrListLocked — a write was attempted on a frozen (locked) list.
+	ErrListLocked = errors.New("list is locked")
+)
+
 type EntryService struct {
 	queries *db.Queries
 	pool    *pgxpool.Pool
@@ -45,22 +56,22 @@ func (s *EntryService) UpsertEntry(ctx context.Context, listID, userID pgtype.UU
 	switch list.ValueType {
 	case "number":
 		if input.ValueDurationMs != nil || input.ValueText != nil {
-			return nil, errors.New("INVALID_VALUE_TYPE")
+			return nil, ErrInvalidValueType
 		}
 	case "duration":
 		if input.ValueNumber != nil || input.ValueText != nil {
-			return nil, errors.New("INVALID_VALUE_TYPE")
+			return nil, ErrInvalidValueType
 		}
 	case "text":
 		if input.ValueNumber != nil || input.ValueDurationMs != nil {
-			return nil, errors.New("INVALID_VALUE_TYPE")
+			return nil, ErrInvalidValueType
 		}
 	}
 
 	// Refuse writes once the owner has frozen the list. Note: a `locked`
 	// list still allows reads — the freeze only blocks new submissions.
 	if list.Locked {
-		return nil, errors.New("LIST_LOCKED")
+		return nil, ErrListLocked
 	}
 
 	tx, err := s.pool.Begin(ctx)

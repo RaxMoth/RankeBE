@@ -1,7 +1,6 @@
 package middleware
 
 import (
-	"context"
 	"net/http"
 
 	"github.com/gin-gonic/gin"
@@ -32,7 +31,7 @@ func RequireListRole(queries *db.Queries, allowedRoles ...string) gin.HandlerFun
 			return
 		}
 
-		member, err := queries.GetListMember(context.Background(), db.GetListMemberParams{
+		member, err := queries.GetListMember(c.Request.Context(), db.GetListMemberParams{
 			ListID: listID,
 			UserID: userID,
 		})
