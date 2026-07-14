@@ -1,6 +1,6 @@
 # Progress Tracker
 
-Last loop run: 2026-07-14T02:00:00Z
+Last loop run: 2026-07-14T20:15:00Z
 Stack: go (Gin + pgx/v5 + sqlc, Postgres 16)
 
 Spec source: `README.md` (API map + behavior) cross-referenced against the
@@ -31,6 +31,7 @@ Flutter client's contract at `../RankeMobile/lib/core/network/api_paths.dart`.
 - [x] **Migration tooling (stdlib, no third-party)** — `embed.FS` in `internal/db/migrations` + a runner (`Apply`) that records applied files in `schema_migrations`, wraps each in its own tx, and serializes concurrent runs with a `pg_advisory_lock`. Auto-applies on server boot; standalone `cmd/migrate` for CI/deploy; `make migrate` no longer needs psql. Dropped the compose `docker-entrypoint-initdb.d` mount (app now owns the schema). Integration test bootstraps its own schema via `Apply`. DB-free unit test guards the embed. — `80858e4` — Note: DB-touching path unverified this run (docker down).
 - [x] **Deployment platform config (Fly.io)** — `fly.toml` (Dockerfile deploy, forced HTTPS, `/readyz` check, one warm machine) + README "Deploying" section with the `fly secrets set` recipe. Removed the now-redundant migrations COPY from the Dockerfile (they're embedded). — `72e977c`
 - [x] **Middleware tests** — white-box DB-free coverage for RequestID (mint/echo/honor-incoming), RateLimiter (burst / per-IP / lazy GC / 429 envelope), Recovery (panic→500, no leak), BodyLimit (413 past cap). — `66d7a68`
+- [x] **Apple verifier tests** — DB-free coverage via a local `httptest` JWKS server + generated RS256 key. `keysURL` is now an injectable `Verifier` field (defaults to Apple's endpoint). Covers valid identity token, wrong aud/iss, expired, missing subject, wrong signing key, `alg:none` downgrade, unknown kid, JWKS caching (single fetch across calls), and notification validation (valid + wrong aud / missing events / empty sub / empty type). — `9f01f06`
 
 ## In Progress
 
@@ -50,7 +51,6 @@ Flutter client's contract at `../RankeMobile/lib/core/network/api_paths.dart`.
 
 - [ ] **`internal/middleware/ratelimit.go` lazy GC** — current implementation walks the whole map on every request. Fine at low QPS, but consider a min-heap or a periodic janitor goroutine if /auth/* sees burst traffic.
 - [ ] **Refresh tokens stored as raw hex** — should be SHA-256 hashed at rest so a DB leak doesn't immediately yield session takeover. Backward-incompatible — needs a migration.
-- [ ] **No tests for the Apple verifier** — would need a fake JWKS server (`httptest.NewServer`) for end-to-end coverage.
 - [ ] **`gin.H` everywhere** — handlers reach for `gin.H{...}` for ad-hoc responses; would be cleaner via the typed `dto` package.
 - [ ] **CHANGELOG.md missing** — add it once we cut a 0.1.0 tag.
 
@@ -67,7 +67,12 @@ Flutter client's contract at `../RankeMobile/lib/core/network/api_paths.dart`.
 - Remaining Backlog is now **owner-blocked, not code-blocked**: Privacy/ToS URLs
   need real hosted legal content; the iOS bundle ID lives in RankeMobile. Neither
   is autonomously codeable in this repo.
-- Next self-contained Go slices if you want to keep looping: Apple-verifier tests
-  (fake JWKS via `httptest.NewServer`), sqlc typed DTOs replacing ad-hoc `gin.H`,
-  or SHA-256 hashing refresh tokens at rest (needs a migration — now trivial to add).
+- Next self-contained Go slices if you want to keep looping: SHA-256 hashing
+  refresh tokens at rest (needs a migration — now trivial to add), sqlc typed
+  DTOs replacing ad-hoc `gin.H`, or the ratelimit lazy-GC → janitor refactor.
+- **Heads-up on the commit hook:** a hook auto-committed this iteration's staged
+  files under the message "need to verify" before the loop's own `git commit`
+  ran; the loop amended it to the proper conventional message (`9f01f06`). If
+  future iterations see a stray "need to verify" commit, that's the same hook —
+  amend, don't duplicate.
 - `.claude/settings.local.json` is per-developer and should stay gitignored; `.claude/commands/loop.md` is the shared `/loop` definition and is committed.
