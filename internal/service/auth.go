@@ -3,6 +3,7 @@ package service
 import (
 	"context"
 	"crypto/rand"
+	"crypto/sha256"
 	"encoding/hex"
 	"errors"
 	"fmt"
@@ -176,12 +177,14 @@ func (s *AuthService) RefreshToken(ctx context.Context, refreshToken string) (*T
 
 	qtx := s.queries.WithTx(tx)
 
-	rt, err := qtx.GetValidRefreshToken(ctx, refreshToken)
+	tokenHash := hashRefreshToken(refreshToken)
+
+	rt, err := qtx.GetValidRefreshToken(ctx, tokenHash)
 	if err != nil {
 		// Distinguish "never existed" from "was valid, now revoked".
 		// pgx returns ErrNoRows for both, so we have to do a second
 		// lookup that includes revoked rows.
-		if existing, lookupErr := qtx.GetRefreshTokenAny(ctx, refreshToken); lookupErr == nil && existing.Revoked {
+		if existing, lookupErr := qtx.GetRefreshTokenAny(ctx, tokenHash); lookupErr == nil && existing.Revoked {
 			// Reuse detected — nuke all refresh tokens for this user.
 			// We don't surface this as a different error: the caller
 			// (a leaked-token holder OR the legitimate user racing)
@@ -221,7 +224,7 @@ func (s *AuthService) RefreshToken(ctx context.Context, refreshToken string) (*T
 }
 
 func (s *AuthService) Logout(ctx context.Context, refreshToken string) error {
-	rt, err := s.queries.GetValidRefreshToken(ctx, refreshToken)
+	rt, err := s.queries.GetValidRefreshToken(ctx, hashRefreshToken(refreshToken))
 	if err != nil {
 		return nil // Idempotent — already revoked or doesn't exist
 	}
@@ -268,9 +271,11 @@ func (s *AuthService) generateAndStoreRefreshToken(ctx context.Context, q *db.Qu
 	}
 	token := hex.EncodeToString(raw)
 
+	// Store only the hash: the raw token is handed to the client and never
+	// persisted, so a DB leak can't be replayed directly against /auth/refresh.
 	_, err := q.CreateRefreshToken(ctx, db.CreateRefreshTokenParams{
 		UserID:    userID,
-		Token:     token,
+		Token:     hashRefreshToken(token),
 		ExpiresAt: pgtype.Timestamptz{Time: time.Now().Add(s.cfg.JWTRefreshTTL), Valid: true},
 	})
 	if err != nil {
@@ -278,6 +283,17 @@ func (s *AuthService) generateAndStoreRefreshToken(ctx context.Context, q *db.Qu
 	}
 
 	return token, nil
+}
+
+// hashRefreshToken maps a raw refresh token to its at-rest representation.
+// SHA-256 (not bcrypt) is sufficient here: the input is 256 bits of CSPRNG
+// output, so it's not brute-forceable, and refresh lookups need to be a
+// single indexed equality match rather than a per-row compare. The hex
+// digest is 64 chars — the same width as the raw token — so it fits the
+// existing `token TEXT UNIQUE` column with no schema change.
+func hashRefreshToken(raw string) string {
+	sum := sha256.Sum256([]byte(raw))
+	return hex.EncodeToString(sum[:])
 }
 
 // TxQuerier wraps a pgx.Tx for use with sqlc queries.
