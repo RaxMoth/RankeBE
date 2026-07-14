@@ -1,0 +1,47 @@
+# Fly.io deployment manifest for the Ranke backend.
+#
+# Chosen over Render / Cloud Run because it deploys the existing Dockerfile
+# as-is, gives HTTPS out of the box (needed for TestFlight), and its managed
+# Postgres attaches a DATABASE_URL with one command.
+#
+# One-time setup and the secrets recipe live in README.md → "Deploying".
+# Secrets (DATABASE_URL, JWT_SECRET, APPLE_BUNDLE_ID, ALLOWED_ORIGINS) are set
+# with `fly secrets set` and deliberately NOT committed here.
+
+app = "ranke-api"          # change to your Fly app name (`fly apps create`)
+primary_region = "ams"     # Amsterdam; pick the region nearest your users
+
+[build]
+  dockerfile = "Dockerfile"
+
+# Non-secret runtime config. ENV=production makes config.validate enforce the
+# strict CORS / JWT / Apple-bundle checks, so the secrets below MUST be set or
+# the app fails fast on boot (by design).
+[env]
+  ENV = "production"
+  PORT = "8080"
+  DB_MAX_CONNS = "25"
+  DB_MIN_CONNS = "2"
+
+[http_service]
+  internal_port = 8080
+  force_https = true
+  auto_stop_machines = "stop"
+  auto_start_machines = true
+  # Keep one machine warm so migrations-on-boot and JWT verification have no
+  # cold-start penalty. The embedded migration runner takes a pg_advisory_lock,
+  # so scaling past one machine still applies migrations exactly once.
+  min_machines_running = 1
+
+  # Readiness probe: /readyz pings Postgres and returns 503 until the pool is
+  # live, so Fly won't route traffic to a machine whose DB isn't reachable yet.
+  [[http_service.checks]]
+    interval = "15s"
+    timeout = "2s"
+    grace_period = "10s"
+    method = "GET"
+    path = "/readyz"
+
+[[vm]]
+  size = "shared-cpu-1x"
+  memory = "512mb"

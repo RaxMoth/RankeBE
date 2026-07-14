@@ -249,3 +249,43 @@ Do not hand-edit those files.
 docker build -t ranke-be .
 docker run -p 8080:8080 --env-file .env ranke-be
 ```
+
+## Deploying (Fly.io)
+
+`fly.toml` deploys the Dockerfile as-is, terminates HTTPS (required before
+TestFlight), and runs a `/readyz` health check. Migrations apply automatically
+on boot, so a deploy needs no separate migrate step.
+
+One-time setup:
+
+```bash
+fly apps create ranke-api                 # match `app` in fly.toml
+fly postgres create --name ranke-db       # managed Postgres
+fly postgres attach ranke-db              # sets the DATABASE_URL secret
+```
+
+Set the remaining secrets (never commit these — `fly.toml` holds only
+non-secret config):
+
+```bash
+fly secrets set \
+  JWT_SECRET="$(openssl rand -hex 32)" \
+  APPLE_BUNDLE_ID="com.yourcompany.rankapp" \
+  ALLOWED_ORIGINS="https://app.ranke.example"
+```
+
+`ENV=production` (in `fly.toml`) makes startup **fail fast** if any of these
+are missing or if `ALLOWED_ORIGINS` is a wildcard — see `config.validate`.
+
+Deploy:
+
+```bash
+fly deploy
+```
+
+Migrations can also be run on their own (CI step, or against a fresh DB)
+without booting the server:
+
+```bash
+DATABASE_URL=... go run ./cmd/migrate
+```

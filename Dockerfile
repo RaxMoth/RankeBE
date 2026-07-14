@@ -23,7 +23,8 @@ RUN apk --no-cache add ca-certificates tzdata \
 
 WORKDIR /app
 COPY --from=builder /out/server .
-COPY --from=builder /app/internal/db/migrations ./migrations/
+# Migrations are compiled into the binary via embed.FS (internal/db/migrations),
+# so there's nothing to copy alongside it.
 
 USER app
 EXPOSE 8080
