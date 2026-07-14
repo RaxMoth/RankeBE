@@ -27,7 +27,7 @@ Flutter client's contract at `../RankeMobile/lib/core/network/api_paths.dart`.
 - [x] **First integration test** — `internal/server/server_test.go`: register → /me → unauth check → create list → /lists → submit entry → ownRank=1 → delete account → cascade verification — `a3b3081`
 - [x] **Sentinel errors in service/entries.go** — `ErrInvalidValueType` / `ErrListLocked` sentinels + handler `errors.Is` mapping. Already present in-tree (reconciled from Backlog/Tech-Debt this loop; not a new commit).
 - [x] **`apple.containsString` → `slices.Contains`** — already migrated in-tree (reconciled this loop).
-- [x] **Pagination on `/lists/public`** — keyset pagination on `(updated_at DESC, id DESC)`, `limit` param (default 30, cap 100), opaque `X-Next-Cursor` header. Body stays a bare array so the current mobile client keeps parsing. Unit tests for cursor round-trip + limit clamp. — `<pending>`
+- [x] **Pagination on `/lists/public`** — keyset pagination on `(updated_at DESC, id DESC)`, `limit` param (default 30, cap 100), opaque `X-Next-Cursor` header. Body stays a bare array so the current mobile client keeps parsing. Unit tests for cursor round-trip + limit clamp. — `0a2053f`
 
 ## In Progress
 
@@ -56,6 +56,10 @@ Flutter client's contract at `../RankeMobile/lib/core/network/api_paths.dart`.
 
 ## Notes for the next loop iteration
 
-- The hardening pass is committed at `a3b3081` — future iterations start from a clean tree.
-- Next priority: top of Backlog (Migration tooling OR sentinel errors in entries.go — both small slices, pick by current pain).
+- Pagination shipped at `0a2053f`; tree is clean.
+- Next priority: **Migration tooling** (top of Backlog). Prefer a stdlib-only
+  approach — `embed.FS` for the SQL + a tiny version-tracking runner — over
+  pulling in goose/golang-migrate, per the go-stack "stdlib over third-party" rule.
+- Heads-up: two Backlog/Tech-Debt items (entries.go sentinels, apple `slices.Contains`)
+  were already done in-tree when this loop ran — verify against code, not just this file.
 - `.claude/settings.local.json` is per-developer and should stay gitignored; `.claude/commands/loop.md` is the shared `/loop` definition and is committed.
