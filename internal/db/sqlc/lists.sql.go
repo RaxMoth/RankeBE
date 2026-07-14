@@ -329,13 +329,22 @@ WHERE l.is_public = TRUE
        OR l.title       ILIKE '%' || $1::TEXT || '%'
        OR l.description ILIKE '%' || $1::TEXT || '%')
   AND ($2::TEXT IS NULL OR l.category = $2::TEXT)
-ORDER BY l.updated_at DESC
-LIMIT 100
+  -- Keyset pagination: fetch rows strictly "after" the caller's cursor in the
+  -- (updated_at DESC, id DESC) ordering. The row-value comparison walks the
+  -- same tuple the ORDER BY uses, so id breaks updated_at ties deterministically
+  -- and no row is skipped or repeated across pages.
+  AND ($3::TIMESTAMPTZ IS NULL
+       OR (l.updated_at, l.id) < ($3::TIMESTAMPTZ, $4::UUID))
+ORDER BY l.updated_at DESC, l.id DESC
+LIMIT $5::INT
 `
 
 type SearchPublicListsParams struct {
-	Q        pgtype.Text `json:"q"`
-	Category pgtype.Text `json:"category"`
+	Q               pgtype.Text        `json:"q"`
+	Category        pgtype.Text        `json:"category"`
+	CursorUpdatedAt pgtype.Timestamptz `json:"cursor_updated_at"`
+	CursorID        pgtype.UUID        `json:"cursor_id"`
+	Lim             int32              `json:"lim"`
 }
 
 type SearchPublicListsRow struct {
@@ -358,7 +367,13 @@ type SearchPublicListsRow struct {
 }
 
 func (q *Queries) SearchPublicLists(ctx context.Context, arg SearchPublicListsParams) ([]SearchPublicListsRow, error) {
-	rows, err := q.db.Query(ctx, searchPublicLists, arg.Q, arg.Category)
+	rows, err := q.db.Query(ctx, searchPublicLists,
+		arg.Q,
+		arg.Category,
+		arg.CursorUpdatedAt,
+		arg.CursorID,
+		arg.Lim,
+	)
 	if err != nil {
 		return nil, err
 	}

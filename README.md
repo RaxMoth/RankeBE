@@ -169,12 +169,18 @@ Register the URL in Apple Developer → Services ID for it to fire.
 | Method | Path                              | Role        |
 |--------|-----------------------------------|-------------|
 | GET    | `/lists`                          | self        |
-| GET    | `/lists/public?q=&category=`      | self        |
+| GET    | `/lists/public?q=&category=&limit=&cursor=` | self  |
 | POST   | `/lists`                          | self        |
 | GET    | `/lists/:id`                      | self (public list) / member (private) |
 | PATCH  | `/lists/:id`                      | owner/admin |
 | DELETE | `/lists/:id`                      | owner       |
 | POST   | `/lists/:id/join`                 | self (public lists only) |
+
+`/lists/public` uses keyset pagination. `limit` defaults to 30 (max 100).
+When more results remain, the response carries an opaque `X-Next-Cursor`
+header; pass it back as `?cursor=` to fetch the next page. The body stays a
+bare array of list summaries — the cursor lives only in the header. No header
+means the last page was reached.
 
 ### Members
 

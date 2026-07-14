@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"time"
 
 	"github.com/jackc/pgx/v5/pgtype"
 	"github.com/jackc/pgx/v5/pgxpool"
@@ -203,15 +204,28 @@ func (s *ListService) RegenerateInviteToken(ctx context.Context, listID pgtype.U
 	return s.queries.RegenerateInviteToken(ctx, listID)
 }
 
-// SearchPublicLists searches public lists by title/description and category.
-// Both args are optional — empty strings drop the filter.
-func (s *ListService) SearchPublicLists(ctx context.Context, query, category string) ([]db.SearchPublicListsRow, error) {
-	params := db.SearchPublicListsParams{}
+// PublicListCursor is the keyset position for public-list pagination: the
+// (updated_at, id) of the last row of the previous page. A nil cursor starts
+// from the top of the (updated_at DESC, id DESC) ordering.
+type PublicListCursor struct {
+	UpdatedAt time.Time
+	ID        pgtype.UUID
+}
+
+// SearchPublicLists searches public lists by title/description and category,
+// returning at most `limit` rows past `cursor`. `query`/`category` are optional
+// (empty strings drop the filter); `cursor` is nil for the first page.
+func (s *ListService) SearchPublicLists(ctx context.Context, query, category string, limit int32, cursor *PublicListCursor) ([]db.SearchPublicListsRow, error) {
+	params := db.SearchPublicListsParams{Lim: limit}
 	if query != "" {
 		params.Q = pgtype.Text{String: query, Valid: true}
 	}
 	if category != "" {
 		params.Category = pgtype.Text{String: category, Valid: true}
+	}
+	if cursor != nil {
+		params.CursorUpdatedAt = pgtype.Timestamptz{Time: cursor.UpdatedAt, Valid: true}
+		params.CursorID = cursor.ID
 	}
 	return s.queries.SearchPublicLists(ctx, params)
 }

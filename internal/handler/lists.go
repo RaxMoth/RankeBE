@@ -1,7 +1,12 @@
 package handler
 
 import (
+	"encoding/base64"
+	"fmt"
 	"net/http"
+	"strconv"
+	"strings"
+	"time"
 
 	"github.com/gin-gonic/gin"
 	"github.com/jackc/pgx/v5/pgtype"
@@ -168,21 +173,102 @@ func (h *ListHandler) GetUserLists(c *gin.Context) {
 	Success(c, http.StatusOK, out)
 }
 
+// Public-list pagination knobs. The mobile discover screen pages through
+// results 30 at a time; the cap keeps a hostile `?limit=` from asking for
+// the whole table in one request.
+const (
+	publicListsDefaultLimit = 30
+	publicListsMaxLimit     = 100
+)
+
 func (h *ListHandler) SearchPublic(c *gin.Context) {
 	q := c.Query("q")
 	cat := c.Query("category")
+	limit := parsePublicListsLimit(c.Query("limit"))
 
-	rows, err := h.lists.SearchPublicLists(c.Request.Context(), q, cat)
+	cursor, ok := decodePublicListCursor(c.Query("cursor"))
+	if !ok {
+		ValidationError(c, "invalid cursor")
+		return
+	}
+
+	// Fetch limit+1 so we can tell whether a further page exists without a
+	// second COUNT query: if we get the extra row, there's more, and we trim
+	// it off before returning.
+	rows, err := h.lists.SearchPublicLists(c.Request.Context(), q, cat, int32(limit)+1, cursor)
 	if err != nil {
 		InternalErrorLog(c, "searchPublic", err)
 		return
+	}
+
+	hasMore := len(rows) > limit
+	if hasMore {
+		rows = rows[:limit]
 	}
 
 	out := make([]dto.ListSummary, 0, len(rows))
 	for _, r := range rows {
 		out = append(out, dto.MapPublicListsRow(r))
 	}
+
+	// The next cursor rides in a response header so the body stays a bare
+	// array — the mobile client unwraps `data` as a list and would break on
+	// an envelope change. Absent header == no further pages.
+	if hasMore && len(rows) > 0 {
+		last := rows[len(rows)-1]
+		c.Header("X-Next-Cursor", encodePublicListCursor(last.UpdatedAt, last.ID))
+	}
+
 	Success(c, http.StatusOK, out)
+}
+
+// parsePublicListsLimit clamps a caller-supplied `?limit=` into
+// [1, publicListsMaxLimit], falling back to the default on empty/garbage input.
+func parsePublicListsLimit(raw string) int {
+	if raw == "" {
+		return publicListsDefaultLimit
+	}
+	n, err := strconv.Atoi(raw)
+	if err != nil || n < 1 {
+		return publicListsDefaultLimit
+	}
+	if n > publicListsMaxLimit {
+		return publicListsMaxLimit
+	}
+	return n
+}
+
+// encodePublicListCursor packs the keyset position (updated_at, id) into an
+// opaque base64url token: `<unixMicros>:<uuid>`.
+func encodePublicListCursor(updatedAt pgtype.Timestamptz, id pgtype.UUID) string {
+	raw := fmt.Sprintf("%d:%s", updatedAt.Time.UnixMicro(), dto.FormatUUID(id))
+	return base64.RawURLEncoding.EncodeToString([]byte(raw))
+}
+
+// decodePublicListCursor reverses encodePublicListCursor. An empty string
+// yields (nil, true) — a valid "first page" request. Malformed input yields
+// (nil, false) so the handler can 400 rather than silently ignore it.
+func decodePublicListCursor(raw string) (*service.PublicListCursor, bool) {
+	if raw == "" {
+		return nil, true
+	}
+	decoded, err := base64.RawURLEncoding.DecodeString(raw)
+	if err != nil {
+		return nil, false
+	}
+	micros, idStr, found := strings.Cut(string(decoded), ":")
+	if !found {
+		return nil, false
+	}
+	us, err := strconv.ParseInt(micros, 10, 64)
+	if err != nil {
+		return nil, false
+	}
+	id, ok := middleware.ParseUUID(idStr)
+	if !ok {
+		return nil, false
+	}
+	return &service.PublicListCursor{UpdatedAt: time.UnixMicro(us).UTC(), ID: id}, true
 }
 
 func (h *ListHandler) GetByID(c *gin.Context) {

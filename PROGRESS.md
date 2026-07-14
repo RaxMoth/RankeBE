@@ -1,6 +1,6 @@
 # Progress Tracker
 
-Last loop run: 2026-06-12T14:45:00+02:00
+Last loop run: 2026-07-14T00:00:00Z
 Stack: go (Gin + pgx/v5 + sqlc, Postgres 16)
 
 Spec source: `README.md` (API map + behavior) cross-referenced against the
@@ -25,6 +25,9 @@ Flutter client's contract at `../RankeMobile/lib/core/network/api_paths.dart`.
 - [x] **Password validation tightened** — min 8 / max 128, displayName max 60 — `a3b3081`
 - [x] **docker-compose dev stack** — `make dev-up` brings up Postgres + API, auto-applies migrations on first boot — `a3b3081`
 - [x] **First integration test** — `internal/server/server_test.go`: register → /me → unauth check → create list → /lists → submit entry → ownRank=1 → delete account → cascade verification — `a3b3081`
+- [x] **Sentinel errors in service/entries.go** — `ErrInvalidValueType` / `ErrListLocked` sentinels + handler `errors.Is` mapping. Already present in-tree (reconciled from Backlog/Tech-Debt this loop; not a new commit).
+- [x] **`apple.containsString` → `slices.Contains`** — already migrated in-tree (reconciled this loop).
+- [x] **Pagination on `/lists/public`** — keyset pagination on `(updated_at DESC, id DESC)`, `limit` param (default 30, cap 100), opaque `X-Next-Cursor` header. Body stays a bare array so the current mobile client keeps parsing. Unit tests for cursor round-trip + limit clamp. — `<pending>`
 
 ## In Progress
 
@@ -33,8 +36,7 @@ Flutter client's contract at `../RankeMobile/lib/core/network/api_paths.dart`.
 ## Backlog (from spec / mobile contract, not started)
 
 - [ ] **Migration tooling** — replace raw `psql` Makefile target with goose or golang-migrate; embed migrations via `embed.FS`. Current state: only the SQL files, applied manually or via compose's `docker-entrypoint-initdb.d` (which only fires on first boot).
-- [ ] **Pagination on `/lists/public`** — current query is `LIMIT 100`. Mobile discover screen needs cursor-based pagination with default page size 30.
-- [ ] **Sentinel errors in service/entries.go** — `errors.New("INVALID_VALUE_TYPE")` + `errors.New("LIST_LOCKED")` + handler `switch err.Error()` should follow the `ErrEmailTaken` pattern established in service/auth.go.
+- [ ] **Mobile: consume `X-Next-Cursor`** — backend now paginates `/lists/public`; the Flutter `searchPublicLists` still ignores the cursor header and reads only the first 30. Tracked here for cross-repo visibility (belongs to RankeMobile, not this repo's loop).
 - [ ] **Deployment platform config** — pick Fly.io / Render / Cloud Run; write the platform manifest + secrets-loading recipe. Blocks shipping to TestFlight (needs HTTPS).
 - [ ] **Privacy policy + ToS URLs** — App Store reject blocker. Mobile already has `--dart-define` plumbing for `PRIVACY_POLICY_URL` / `TERMS_OF_SERVICE_URL`.
 - [ ] **iOS bundle ID** — currently `com.example.flutterbase`. Set to a real reverse-DNS before enabling Sign in with Apple capability in Apple Developer.
@@ -45,8 +47,6 @@ Flutter client's contract at `../RankeMobile/lib/core/network/api_paths.dart`.
 
 ## Tech Debt / Improvements
 
-- [ ] **service/entries.go string errors** — replace `errors.New("INVALID_VALUE_TYPE")` / `"LIST_LOCKED"` with package-level sentinels + `errors.Is`. Idiomatic Go and matches the auth pattern.
-- [ ] **`apple.containsString` → `slices.Contains`** — stdlib has it now; drop the local helper.
 - [ ] **`internal/middleware/ratelimit.go` lazy GC** — current implementation walks the whole map on every request. Fine at low QPS, but consider a min-heap or a periodic janitor goroutine if /auth/* sees burst traffic.
 - [ ] **Refresh tokens stored as raw hex** — should be SHA-256 hashed at rest so a DB leak doesn't immediately yield session takeover. Backward-incompatible — needs a migration.
 - [ ] **No tests for middleware** — RequestID, Logger, RateLimiter, Recovery all uncovered.

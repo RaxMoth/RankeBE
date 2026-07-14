@@ -105,5 +105,11 @@ WHERE l.is_public = TRUE
        OR l.title       ILIKE '%' || sqlc.narg('q')::TEXT || '%'
        OR l.description ILIKE '%' || sqlc.narg('q')::TEXT || '%')
   AND (sqlc.narg('category')::TEXT IS NULL OR l.category = sqlc.narg('category')::TEXT)
-ORDER BY l.updated_at DESC
-LIMIT 100;
+  -- Keyset pagination: fetch rows strictly "after" the caller's cursor in the
+  -- (updated_at DESC, id DESC) ordering. The row-value comparison walks the
+  -- same tuple the ORDER BY uses, so id breaks updated_at ties deterministically
+  -- and no row is skipped or repeated across pages.
+  AND (sqlc.narg('cursor_updated_at')::TIMESTAMPTZ IS NULL
+       OR (l.updated_at, l.id) < (sqlc.narg('cursor_updated_at')::TIMESTAMPTZ, sqlc.narg('cursor_id')::UUID))
+ORDER BY l.updated_at DESC, l.id DESC
+LIMIT sqlc.arg('lim')::INT;
