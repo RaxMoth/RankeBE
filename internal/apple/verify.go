@@ -30,6 +30,10 @@ const jwksCacheTTL = time.Hour
 type Verifier struct {
 	bundleID string
 
+	// keysURL is Apple's JWKS endpoint. Defaults to appleKeysURL in
+	// production; tests point it at a local httptest server.
+	keysURL string
+
 	mu        sync.RWMutex
 	keys      map[string]*rsa.PublicKey
 	fetchedAt time.Time
@@ -42,6 +46,7 @@ type Verifier struct {
 func NewVerifier(bundleID string) *Verifier {
 	return &Verifier{
 		bundleID:   bundleID,
+		keysURL:    appleKeysURL,
 		keys:       make(map[string]*rsa.PublicKey),
 		httpClient: &http.Client{Timeout: appleKeyFetchTimeout},
 	}
@@ -213,7 +218,7 @@ func (v *Verifier) fetchKeys(ctx context.Context) error {
 	ctx, cancel := context.WithTimeout(ctx, appleKeyFetchTimeout)
 	defer cancel()
 
-	req, err := http.NewRequestWithContext(ctx, http.MethodGet, appleKeysURL, nil)
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, v.keysURL, nil)
 	if err != nil {
 		return err
 	}
