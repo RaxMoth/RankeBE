@@ -82,16 +82,18 @@ cp .env.example .env
 make dev-up           # Postgres + API in docker compose
 ```
 
-The first boot of the Postgres container auto-runs every migration via
-`docker-entrypoint-initdb.d`. After editing a migration, `make dev-reset`
-wipes the volume so the next `dev-up` re-applies.
+Migrations are embedded in the binary (`embed.FS`) and applied automatically
+on server startup — the API brings the schema up to date before it serves,
+whether the volume is brand-new or just needs the latest migration. Each file
+is applied once and recorded in the `schema_migrations` table; the run is
+serialized with a Postgres advisory lock so scaled replicas don't race.
 
 Or step-by-step (your own Postgres, hot reload of the Go code):
 
 ```bash
 make install
-make migrate          # applies all migrations to $DATABASE_URL
-make run              # foreground; reads .env
+make migrate          # applies embedded migrations to $DATABASE_URL (no psql)
+make run              # foreground; reads .env (also migrates on boot)
 ```
 
 Health endpoints:

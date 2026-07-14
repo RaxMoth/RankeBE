@@ -32,11 +32,8 @@ clean: ## Clean build artifacts
 sqlc: ## Regenerate sqlc code from SQL queries
 	sqlc generate
 
-migrate: ## Apply all migrations to local PostgreSQL (requires psql)
-	@for f in internal/db/migrations/*.sql; do \
-	  echo "Applying $$f"; \
-	  psql "$${DATABASE_URL:-$(DEV_DATABASE_URL)}" -v ON_ERROR_STOP=1 -f "$$f" || exit 1; \
-	done
+migrate: ## Apply embedded migrations to local PostgreSQL (no psql needed)
+	DATABASE_URL="$${DATABASE_URL:-$(DEV_DATABASE_URL)}" go run ./cmd/migrate
 
 fmt: ## Format code
 	go fmt ./...

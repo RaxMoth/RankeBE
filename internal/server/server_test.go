@@ -17,6 +17,7 @@ import (
 	"github.com/jackc/pgx/v5/pgxpool"
 
 	"ranke-be/internal/config"
+	"ranke-be/internal/db/migrations"
 	"ranke-be/internal/server"
 )
 
@@ -61,9 +62,16 @@ func testApp(t *testing.T) (*server.App, func()) {
 		t.Fatalf("ping: %v", err)
 	}
 
+	// Bring the schema up to date so a brand-new throwaway Postgres works
+	// with no external provisioning — this also exercises the embedded
+	// migration runner on every integration run.
+	if _, err := migrations.Apply(context.Background(), pool); err != nil {
+		pool.Close()
+		t.Fatalf("migrate: %v", err)
+	}
+
 	// Wipe every table in dependency order so tests start from a known
-	// blank state. We don't drop the schema — migrations may not have a
-	// way to re-run here.
+	// blank state.
 	if _, err := pool.Exec(context.Background(), `
 		TRUNCATE TABLE refresh_tokens, entries, list_members, lists, users
 		RESTART IDENTITY CASCADE

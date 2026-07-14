@@ -19,6 +19,7 @@ import (
 
 	"ranke-be/internal/apple"
 	"ranke-be/internal/config"
+	"ranke-be/internal/db/migrations"
 	"ranke-be/internal/server"
 )
 
@@ -62,6 +63,21 @@ func main() {
 		log.Fatalf("database ping: %v", err)
 	}
 	pingCancel()
+
+	// Apply embedded schema migrations before serving. Idempotent — already
+	// applied versions are skipped — and serialized via a Postgres advisory
+	// lock so rolling deploys / scaled replicas don't race.
+	migrateCtx, migrateCancel := context.WithTimeout(context.Background(), 30*time.Second)
+	applied, err := migrations.Apply(migrateCtx, pool)
+	migrateCancel()
+	if err != nil {
+		log.Fatalf("migrate: %v", err)
+	}
+	if len(applied) > 0 {
+		logger.Info("migrations applied", slog.Any("versions", applied))
+	} else {
+		logger.Info("migrations up to date")
+	}
 
 	// Apple Sign-In verifier (optional). config.validate already enforces
 	// the bundle ID is set in production.

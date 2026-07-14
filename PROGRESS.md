@@ -1,6 +1,6 @@
 # Progress Tracker
 
-Last loop run: 2026-07-14T00:00:00Z
+Last loop run: 2026-07-14T01:00:00Z
 Stack: go (Gin + pgx/v5 + sqlc, Postgres 16)
 
 Spec source: `README.md` (API map + behavior) cross-referenced against the
@@ -28,6 +28,7 @@ Flutter client's contract at `../RankeMobile/lib/core/network/api_paths.dart`.
 - [x] **Sentinel errors in service/entries.go** — `ErrInvalidValueType` / `ErrListLocked` sentinels + handler `errors.Is` mapping. Already present in-tree (reconciled from Backlog/Tech-Debt this loop; not a new commit).
 - [x] **`apple.containsString` → `slices.Contains`** — already migrated in-tree (reconciled this loop).
 - [x] **Pagination on `/lists/public`** — keyset pagination on `(updated_at DESC, id DESC)`, `limit` param (default 30, cap 100), opaque `X-Next-Cursor` header. Body stays a bare array so the current mobile client keeps parsing. Unit tests for cursor round-trip + limit clamp. — `0a2053f`
+- [x] **Migration tooling (stdlib, no third-party)** — `embed.FS` in `internal/db/migrations` + a runner (`Apply`) that records applied files in `schema_migrations`, wraps each in its own tx, and serializes concurrent runs with a `pg_advisory_lock`. Auto-applies on server boot; standalone `cmd/migrate` for CI/deploy; `make migrate` no longer needs psql. Dropped the compose `docker-entrypoint-initdb.d` mount (app now owns the schema). Integration test bootstraps its own schema via `Apply`. DB-free unit test guards the embed. — `<pending>` — Note: DB-touching path unverified this run (docker down).
 
 ## In Progress
 
@@ -35,7 +36,6 @@ Flutter client's contract at `../RankeMobile/lib/core/network/api_paths.dart`.
 
 ## Backlog (from spec / mobile contract, not started)
 
-- [ ] **Migration tooling** — replace raw `psql` Makefile target with goose or golang-migrate; embed migrations via `embed.FS`. Current state: only the SQL files, applied manually or via compose's `docker-entrypoint-initdb.d` (which only fires on first boot).
 - [ ] **Mobile: consume `X-Next-Cursor`** — backend now paginates `/lists/public`; the Flutter `searchPublicLists` still ignores the cursor header and reads only the first 30. Tracked here for cross-repo visibility (belongs to RankeMobile, not this repo's loop).
 - [ ] **Deployment platform config** — pick Fly.io / Render / Cloud Run; write the platform manifest + secrets-loading recipe. Blocks shipping to TestFlight (needs HTTPS).
 - [ ] **Privacy policy + ToS URLs** — App Store reject blocker. Mobile already has `--dart-define` plumbing for `PRIVACY_POLICY_URL` / `TERMS_OF_SERVICE_URL`.
@@ -56,10 +56,13 @@ Flutter client's contract at `../RankeMobile/lib/core/network/api_paths.dart`.
 
 ## Notes for the next loop iteration
 
-- Pagination shipped at `0a2053f`; tree is clean.
-- Next priority: **Migration tooling** (top of Backlog). Prefer a stdlib-only
-  approach — `embed.FS` for the SQL + a tiny version-tracking runner — over
-  pulling in goose/golang-migrate, per the go-stack "stdlib over third-party" rule.
-- Heads-up: two Backlog/Tech-Debt items (entries.go sentinels, apple `slices.Contains`)
-  were already done in-tree when this loop ran — verify against code, not just this file.
+- Migration tooling shipped this loop; tree is clean.
+- **Verify next time docker is up:** run `make test-integration` (or `make dev-up`)
+  to exercise `migrations.Apply` against a real Postgres — the runner's DB path
+  (advisory lock, per-file tx, multi-statement Exec) has only been reasoned about,
+  not run, because docker was down this iteration.
+- Next priority: top of Backlog — **Deployment platform config** (Fly.io/Render/Cloud Run
+  manifest + secrets recipe) unblocks TestFlight; or **Privacy/ToS URLs**. Both are
+  ops/infra rather than code, so weigh against a code item like the middleware tests
+  (Tech Debt) if you want a self-contained Go slice.
 - `.claude/settings.local.json` is per-developer and should stay gitignored; `.claude/commands/loop.md` is the shared `/loop` definition and is committed.
