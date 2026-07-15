@@ -1,6 +1,6 @@
 # Progress Tracker
 
-Last loop run: 2026-07-14T20:15:00Z
+Last loop run: 2026-07-14T21:15:00Z
 Stack: go (Gin + pgx/v5 + sqlc, Postgres 16)
 
 Spec source: `README.md` (API map + behavior) cross-referenced against the
@@ -31,6 +31,7 @@ Flutter client's contract at `../RankeMobile/lib/core/network/api_paths.dart`.
 - [x] **Migration tooling (stdlib, no third-party)** — `embed.FS` in `internal/db/migrations` + a runner (`Apply`) that records applied files in `schema_migrations`, wraps each in its own tx, and serializes concurrent runs with a `pg_advisory_lock`. Auto-applies on server boot; standalone `cmd/migrate` for CI/deploy; `make migrate` no longer needs psql. Dropped the compose `docker-entrypoint-initdb.d` mount (app now owns the schema). Integration test bootstraps its own schema via `Apply`. DB-free unit test guards the embed. — `80858e4` — Note: DB-touching path unverified this run (docker down).
 - [x] **Deployment platform config (Fly.io)** — `fly.toml` (Dockerfile deploy, forced HTTPS, `/readyz` check, one warm machine) + README "Deploying" section with the `fly secrets set` recipe. Removed the now-redundant migrations COPY from the Dockerfile (they're embedded). — `72e977c`
 - [x] **Middleware tests** — white-box DB-free coverage for RequestID (mint/echo/honor-incoming), RateLimiter (burst / per-IP / lazy GC / 429 envelope), Recovery (panic→500, no leak), BodyLimit (413 past cap). — `66d7a68`
+- [x] **Refresh tokens hashed at rest (SHA-256)** — tokens were stored raw hex; a DB leak yielded directly replayable sessions. Now store the SHA-256 digest; the raw token is only returned to the client, and refresh/logout hash before the indexed lookup. No column change (digest is the same 64-char width); migration `003` truncates pre-hash rows so stale sessions cut over cleanly. DB-free test covers digest invariants. — `a3a5e9d` — Note: DB-touching refresh/logout path unverified this run (docker down); the SHA-256 digest logic itself is unit-tested.
 - [x] **Apple verifier tests** — DB-free coverage via a local `httptest` JWKS server + generated RS256 key. `keysURL` is now an injectable `Verifier` field (defaults to Apple's endpoint). Covers valid identity token, wrong aud/iss, expired, missing subject, wrong signing key, `alg:none` downgrade, unknown kid, JWKS caching (single fetch across calls), and notification validation (valid + wrong aud / missing events / empty sub / empty type). — `9f01f06`
 
 ## In Progress
@@ -50,26 +51,24 @@ Flutter client's contract at `../RankeMobile/lib/core/network/api_paths.dart`.
 ## Tech Debt / Improvements
 
 - [ ] **`internal/middleware/ratelimit.go` lazy GC** — current implementation walks the whole map on every request. Fine at low QPS, but consider a min-heap or a periodic janitor goroutine if /auth/* sees burst traffic.
-- [ ] **Refresh tokens stored as raw hex** — should be SHA-256 hashed at rest so a DB leak doesn't immediately yield session takeover. Backward-incompatible — needs a migration.
 - [ ] **`gin.H` everywhere** — handlers reach for `gin.H{...}` for ad-hoc responses; would be cleaner via the typed `dto` package.
 - [ ] **CHANGELOG.md missing** — add it once we cut a 0.1.0 tag.
 
 ## Notes for the next loop iteration
 
-- Three slices shipped this session: pagination (`0a2053f`), migration tooling
-  (`80858e4`), Fly.io deploy config (`72e977c`), middleware tests (`66d7a68`).
-  Tree is clean.
-- **Verify next time docker is up:** run `make test-integration` (or `make dev-up`)
+- This iteration: refresh tokens hashed at rest (`a3a5e9d`). Tree is clean.
+- **Verify next time docker is up:** (1) run `make test-integration` (or `make dev-up`)
   to exercise `migrations.Apply` against a real Postgres — the runner's DB path
-  (advisory lock, per-file tx, multi-statement Exec) has only been reasoned about,
-  not run, because docker was down. Also a good moment to `fly deploy` and confirm
-  the manifest against the live platform.
+  (advisory lock, per-file tx, multi-statement Exec) plus the new `003` TRUNCATE
+  have only been reasoned about, not run, because docker was down. (2) Exercise the
+  full auth round-trip (register → refresh → logout, plus reuse-detection) against
+  Postgres to confirm the SHA-256 hashing at store + lookup matches end-to-end.
+  Also a good moment to `fly deploy` and confirm the manifest against the live platform.
 - Remaining Backlog is now **owner-blocked, not code-blocked**: Privacy/ToS URLs
   need real hosted legal content; the iOS bundle ID lives in RankeMobile. Neither
   is autonomously codeable in this repo.
-- Next self-contained Go slices if you want to keep looping: SHA-256 hashing
-  refresh tokens at rest (needs a migration — now trivial to add), sqlc typed
-  DTOs replacing ad-hoc `gin.H`, or the ratelimit lazy-GC → janitor refactor.
+- Next self-contained Go slices if you want to keep looping: sqlc typed DTOs
+  replacing ad-hoc `gin.H`, or the ratelimit lazy-GC → janitor refactor.
 - **Heads-up on the commit hook:** a hook auto-committed this iteration's staged
   files under the message "need to verify" before the loop's own `git commit`
   ran; the loop amended it to the proper conventional message (`9f01f06`). If
